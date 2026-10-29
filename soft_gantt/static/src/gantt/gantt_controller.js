@@ -21,10 +21,12 @@ import {
     DAY_MS,
     addFieldDays,
     buildCsv,
+    dateTimeInUserZone,
     downloadTextFile,
     fieldText,
     fitWindow,
     formatWindowLabel,
+    getUserZone,
     parseOdooFieldDate,
     serializeOdooDate,
     shiftWindow,
@@ -33,8 +35,6 @@ import {
     WINDOW_RANGES,
 } from "./gantt_utils";
 import { GanttSoftPopover } from "./gantt_popover";
-
-const { DateTime } = luxon;
 
 /**
  * Records the "fit" gesture reads before computing its range.
@@ -288,12 +288,14 @@ export class GanttSoftController extends Component {
         for (const record of records) {
             const start = parseOdooFieldDate(record[archInfo.dateStart], archInfo.dateStartType);
             const stop = parseOdooFieldDate(record[archInfo.dateStop], archInfo.dateStopType);
-            if (start !== null) {
-                starts.push(start);
+            if (start === null && stop === null) {
+                continue;
             }
-            if (stop !== null) {
-                stops.push(stop);
-            }
+            // Match the renderer: a missing end is the other date. Keeping that
+            // association lets fitWindow distinguish a real midnight stop from
+            // a single-date point that must include its own day.
+            starts.push(start ?? stop);
+            stops.push(stop ?? start);
         }
         const window = fitWindow(starts, stops);
         if (!window) {
@@ -360,8 +362,10 @@ export class GanttSoftController extends Component {
         if (timestamp === null) {
             return "";
         }
-        const date = DateTime.fromMillis(timestamp);
-        return fieldType === "date" ? formatDate(date) : formatDateTime(date);
+        const date = dateTimeInUserZone(timestamp);
+        return fieldType === "date"
+            ? formatDate(date)
+            : formatDateTime(date, { tz: getUserZone() });
     }
 
     onBarClick(row, element) {
@@ -406,8 +410,17 @@ export class GanttSoftController extends Component {
             }
             // `date` fields carry no time part, and the two are formatted with
             // the user's own formats and timezone.
-            const parsed = (type === "date" ? parseDate : parseDateTime)(raw);
-            add(name, parsed && (type === "date" ? formatDate : formatDateTime)(parsed));
+            const parsed =
+                type === "date"
+                    ? parseDate(raw, { tz: getUserZone() })
+                    : parseDateTime(raw, { tz: getUserZone() });
+            add(
+                name,
+                parsed &&
+                    (type === "date"
+                        ? formatDate(parsed)
+                        : formatDateTime(parsed, { tz: getUserZone() }))
+            );
         }
         for (const fieldInfo of Object.values(archInfo.fieldNodes)) {
             add(fieldInfo.name, this._fieldValue(fieldInfo.name, record[fieldInfo.name]));
@@ -426,15 +439,18 @@ export class GanttSoftController extends Component {
             return option ? option[1] : value;
         }
         if (field?.type === "date") {
-            const parsed = parseDate(value);
+            const parsed = parseDate(value, { tz: getUserZone() });
             return parsed ? formatDate(parsed) : String(value);
         }
         if (field?.type === "datetime") {
-            const parsed = parseDateTime(value);
-            return parsed ? formatDateTime(parsed) : String(value);
+            const parsed = parseDateTime(value, { tz: getUserZone() });
+            return parsed ? formatDateTime(parsed, { tz: getUserZone() }) : String(value);
         }
         if (field?.type === "boolean") {
             return value ? _t("Yes") : _t("No");
+        }
+        if (["integer", "float", "monetary"].includes(field?.type)) {
+            return value;
         }
         return fieldText(value);
     }

@@ -159,10 +159,10 @@ Behaviour
   rows of ``group_by``; a menu entry that changes nothing is worse than no
   entry.
 * **The timeline is the reader's calendar.** The columns are cut on the *user's*
-  timezone (Odoo sets luxon's default zone from the user): the hours of their
-  day, the days of their week, the Monday that starts it. A job stored as 04:00
-  UTC is 07:00 in Turkey, and the 07:00 column is where it is drawn, instead of
-  landing three hours away.
+  profile timezone (``user.tz``, with the browser zone as a fallback): the
+  hours of their day, the days of their week, the Monday that starts it. A job
+  stored as 04:00 UTC is 07:00 in Turkey, and the 07:00 column is where it is
+  drawn, instead of landing three hours away.
 * **Date and Datetime are read differently.** A ``datetime`` is an instant
   stored in UTC: it is read and written in UTC, so nothing moves when a DST day
   is 23 or 25 hours long. A ``date`` is a calendar day with no timezone: it is

@@ -1,6 +1,14 @@
 import { after, beforeEach, describe, expect, test } from "@odoo/hoot";
+import { user } from "@web/core/user";
 
-import { buildTimeline, ensureDuration, snapToUnit, windowRange } from "@soft_gantt/gantt/gantt_utils";
+import {
+    barGeometry,
+    buildTimeline,
+    dateTimeInUserZone,
+    ensureDuration,
+    snapToUnit,
+    windowRange,
+} from "@soft_gantt/gantt/gantt_utils";
 
 /** A UTC timestamp, written as the date a human reads. */
 const at = (text) => Date.parse(`${text}T00:00:00Z`);
@@ -15,11 +23,14 @@ const DAY = 24 * HOUR;
  * test that is *about* the timezone sets its own inside the test.
  */
 const ORIGINAL_ZONE = luxon.Settings.defaultZone;
+const ORIGINAL_TIMEZONE = user.tz;
 beforeEach(() => {
     luxon.Settings.defaultZone = "UTC";
+    user.updateContext({ tz: "UTC" });
 });
 after(() => {
     luxon.Settings.defaultZone = ORIGINAL_ZONE;
+    user.updateContext({ tz: ORIGINAL_TIMEZONE });
 });
 
 describe("buildTimeline", () => {
@@ -94,6 +105,44 @@ describe("buildTimeline", () => {
             );
             expect(bandUnit).not.toBe(unit);
         }
+    });
+});
+
+describe("barGeometry", () => {
+    const rangeStart = at("2026-03-01");
+    const rangeEnd = at("2026-04-01");
+
+    test("clips both ends before calculating the visible width", () => {
+        const geometry = barGeometry(
+            at("2026-02-15"),
+            at("2026-03-16"),
+            rangeStart,
+            rangeEnd
+        );
+
+        expect(geometry.left).toBe(0);
+        expect(geometry.width).toBeCloseTo((15 / 31) * 100, { margin: 1e-8 });
+    });
+
+    test("clips a bar extending beyond the end of the window", () => {
+        const geometry = barGeometry(
+            at("2026-03-16"),
+            at("2026-04-15"),
+            rangeStart,
+            rangeEnd
+        );
+
+        expect(geometry.left).toBeCloseTo((15 / 31) * 100, { margin: 1e-8 });
+        expect(geometry.width).toBeCloseTo((16 / 31) * 100, { margin: 1e-8 });
+    });
+
+    test("returns no geometry for intervals outside the window", () => {
+        expect(
+            barGeometry(at("2026-02-01"), at("2026-03-01"), rangeStart, rangeEnd)
+        ).toBe(null);
+        expect(
+            barGeometry(at("2026-04-01"), at("2026-04-02"), rangeStart, rangeEnd)
+        ).toBe(null);
     });
 });
 
@@ -192,6 +241,17 @@ describe("ensureDuration", () => {
         expect(ensureDuration(start, null, "day")).toEqual({ start, stop: start + DAY });
     });
 
+    test("a missing end is one local day across a DST switch", () => {
+        user.updateContext({ tz: "Europe/Brussels" });
+        const start = windowRange(Date.parse("2026-03-29T12:00:00Z"), "day").start;
+        const { start: drawnStart, stop } = ensureDuration(start, null, "day");
+        const snapped = snapToUnit(drawnStart, stop, "day");
+        const expectedStop = windowRange(Date.parse("2026-03-30T12:00:00Z"), "day").start;
+
+        expect(snapped.start).toBe(start);
+        expect(snapped.stop).toBe(expectedStop);
+    });
+
     test("an end before the start is still given a duration", () => {
         const start = at("2026-03-03") + 8 * HOUR;
         expect(ensureDuration(start, start - HOUR, "hour")).toEqual({ start, stop: start + HOUR });
@@ -213,18 +273,18 @@ describe("ensureDuration", () => {
  */
 describe("buildTimeline in the user's timezone", () => {
     test("a day cell starts at the user's local midnight", () => {
-        luxon.Settings.defaultZone = "Europe/Istanbul";
+        user.updateContext({ tz: "Europe/Istanbul" });
         const { start, end } = windowRange(Date.parse("2026-03-03T00:00:00Z"), "week");
         // The local Monday is 2026-03-02: midnight there is 2026-03-01T21:00Z.
         const { unit, cells } = buildTimeline("week", start, end);
         expect(unit).toBe("day");
         expect(cells.length).toBe(7);
         expect(cells[0].start).toBe(Date.parse("2026-03-01T21:00:00Z"));
-        expect(luxon.DateTime.fromMillis(cells[0].start).hour).toBe(0);
+        expect(dateTimeInUserZone(cells[0].start).hour).toBe(0);
     });
 
     test("the hours of a local day are labelled in local time", () => {
-        luxon.Settings.defaultZone = "Europe/Istanbul";
+        user.updateContext({ tz: "Europe/Istanbul" });
         const { start, end } = windowRange(Date.parse("2026-03-03T00:00:00Z"), "day");
         const { unit, cells } = buildTimeline("day", start, end);
         expect(unit).toBe("hour");

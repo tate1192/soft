@@ -3,6 +3,7 @@ import { queryAll, queryFirst, queryOne } from "@odoo/hoot-dom";
 import { animationFrame } from "@odoo/hoot-mock";
 import { App, Component, xml, useState } from "@odoo/owl";
 import { getTemplate, registerTemplate } from "@web/core/templates";
+import { user } from "@web/core/user";
 import { allowTranslations } from "@web/../tests/web_test_helpers";
 
 import { GanttSoftRenderer } from "@soft_gantt/gantt/gantt_renderer";
@@ -18,11 +19,14 @@ const TEMPLATE_URL = "/soft_gantt/static/src/gantt/gantt_renderer.xml";
  * *about* the timezone set their own inside the test.
  */
 const ORIGINAL_ZONE = luxon.Settings.defaultZone;
+const ORIGINAL_TIMEZONE = user.tz;
 beforeEach(() => {
     luxon.Settings.defaultZone = "UTC";
+    user.updateContext({ tz: "UTC" });
 });
 after(() => {
     luxon.Settings.defaultZone = ORIGINAL_ZONE;
+    user.updateContext({ tz: ORIGINAL_TIMEZONE });
 });
 
 let templatePromise = null;
@@ -724,7 +728,7 @@ describe("GanttSoftRenderer", () => {
         // 21:30Z, i.e. 00:30 local, so it belongs in the first hour cell. A
         // forced-UTC placement would have thrown it to ~90% across the window,
         // and jobs at 07:00 local would have read 04:00.
-        luxon.Settings.defaultZone = "Europe/Istanbul";
+        user.updateContext({ tz: "Europe/Istanbul" });
         await mountRenderer({
             scale: "day",
             window: windowRange(Date.parse("2026-03-04T00:00:00Z"), "day"),
@@ -741,7 +745,7 @@ describe("GanttSoftRenderer", () => {
     test("a date field keeps the user's calendar day in a negative offset", async () => {
         // A Date has no timezone: 2026-03-05 is the 5th in New York too. An
         // UTC-midnight reading would put the bar on the 4th there.
-        luxon.Settings.defaultZone = "America/New_York";
+        user.updateContext({ tz: "America/New_York" });
         await mountRenderer({
             scale: "week",
             window: windowRange(Date.parse("2026-03-02T12:00:00Z"), "week"),

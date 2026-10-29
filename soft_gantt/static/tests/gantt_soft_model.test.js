@@ -1,14 +1,18 @@
 import { after, beforeEach, describe, expect, test } from "@odoo/hoot";
+import { user } from "@web/core/user";
 
 import { GanttSoftModel } from "@soft_gantt/gantt/gantt_model";
 import { windowRange } from "@soft_gantt/gantt/gantt_utils";
 
 const ORIGINAL_ZONE = luxon.Settings.defaultZone;
+const ORIGINAL_TIMEZONE = user.tz;
 beforeEach(() => {
     luxon.Settings.defaultZone = "UTC";
+    user.updateContext({ tz: "UTC" });
 });
 after(() => {
     luxon.Settings.defaultZone = ORIGINAL_ZONE;
+    user.updateContext({ tz: ORIGINAL_TIMEZONE });
 });
 
 /**
@@ -97,15 +101,16 @@ describe("GanttSoftModel", () => {
 
         expect(isPrefixDomain(domain)).toBe(true);
         const flat = JSON.stringify(domain);
-        // The three shapes: both dates, only a start, only a stop.
+        // Both dates, a boundary point, only a start and only a stop.
         expect(flat).toInclude('["date_start","<"');
-        expect(flat).toInclude('["date_deadline",">="');
+        expect(flat).toInclude('["date_deadline",">","2026-03-01 00:00:00"]');
+        expect(flat).toInclude('["date_start","=","2026-03-01 00:00:00"]');
         expect(flat).toInclude('["date_start","=",false]');
         expect(flat).toInclude('["date_deadline","=",false]');
     });
 
     test("the window boundaries are serialised for each field's type", () => {
-        luxon.Settings.defaultZone = "Europe/Istanbul";
+        user.updateContext({ tz: "Europe/Istanbul" });
         const { model } = makeModel({
             archInfo: makeArchInfo({
                 dateStartType: "date",

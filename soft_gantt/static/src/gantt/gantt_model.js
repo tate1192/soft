@@ -84,16 +84,17 @@ export class GanttSoftModel extends Model {
     /**
      * Domain keeping the records that overlap the window.
      *
-     * Three shapes are kept, because a record may carry both dates, only its
-     * start or only its stop:
+     * The date shapes are kept, because a record may carry both dates, only
+     * its start or only its stop:
      *
-     * - both dates: the intervals overlap, `dateStart < end` and
-     *   `dateStop >= start`;
+     * - both dates: the half-open intervals overlap, `dateStart < end` and
+     *   `dateStop > start`;
+     * - a zero-length point exactly at the window start is included;
      * - only a start: `dateStart` falls inside the window;
      * - only a stop: `dateStop` falls inside the window.
      *
      * The domain is built with the `Domain` combinators, never as a hand
-     * written prefix list: the OR of the three shapes is easy to get wrong by
+     * written prefix list: the OR of these shapes is easy to get wrong by
      * hand and the server refuses a malformed list with a `ValueError` before
      * any record is read.
      */
@@ -111,7 +112,13 @@ export class GanttSoftModel extends Model {
         return Domain.or([
             [
                 [dateStart, "<", endAtStart],
-                [dateStop, ">=", startAtStop],
+                [dateStop, ">", startAtStop],
+            ],
+            // A zero-length record exactly on the window's first instant is a
+            // visible point, even though its half-open interval has no overlap.
+            [
+                [dateStart, "=", startAtStart],
+                [dateStop, "=", startAtStop],
             ],
             [
                 [dateStart, "=", false],
