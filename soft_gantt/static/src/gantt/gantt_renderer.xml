@@ -63,7 +63,7 @@
                             </div>
                             <div t-attf-style="height: {{ paddingBottom }}px"/>
                         </div>
-                        <div class="o_gantt_soft_timeline">
+                        <div class="o_gantt_soft_timeline" t-ref="timeline">
                             <!--
                                 The column lines and the today marker share the
                                 height of the rows (spacers included) rather than
@@ -81,6 +81,24 @@
                                      t-attf-style="left: {{ todayLeft }}%; width: {{ todayWidth }}%"/>
                             </div>
                             <div class="o_gantt_soft_rows">
+                                <!--
+                                    Dependency arrows. Drawn over the rows (spacers
+                                    included) so a curve can leave one row and reach
+                                    another; the renderer skips a pair whose bars are
+                                    not both painted.
+                                -->
+                                <svg t-if="dependencyArrows.length" class="o_gantt_soft_dependencies"
+                                     t-attf-style="height: {{ rowsHeight }}px">
+                                    <defs>
+                                        <marker id="o_gantt_soft_arrow_head" markerWidth="8" markerHeight="8"
+                                                refX="7" refY="4" orient="auto">
+                                            <path d="M0,0 L8,4 L0,8 z" class="o_gantt_soft_arrow_head"/>
+                                        </marker>
+                                    </defs>
+                                    <path t-foreach="dependencyArrows" t-as="arrow" t-key="arrow.key"
+                                          t-att-d="arrow.d" class="o_gantt_soft_dependency"
+                                          marker-end="url(#o_gantt_soft_arrow_head)"/>
+                                </svg>
                                 <div t-attf-style="height: {{ paddingTop }}px"/>
                                 <div t-foreach="visibleRows" t-as="row" t-key="row.id"
                                      class="o_gantt_soft_row"
@@ -97,12 +115,13 @@
                                              t-attf-style="width: {{ bar.progress }}%"/>
                                         <!-- Resize grips, only when the record may be
                                              edited: dragging one changes that date. A
-                                             folded group has no single record to resize. -->
-                                        <span t-if="props.canEdit and !bar.collapsedGroup"
+                                             folded group has no single record to resize,
+                                             and a milestone has no duration to resize. -->
+                                        <span t-if="props.canEdit and !bar.collapsedGroup and !bar.milestone"
                                               class="o_gantt_soft_bar_handle o_gantt_soft_bar_handle_start"
                                               t-on-pointerdown="(ev) => this.onResizePointerDown(ev, bar, 'start')"/>
-                                        <span class="o_gantt_soft_bar_label" t-esc="bar.label"/>
-                                        <span t-if="props.canEdit and !bar.collapsedGroup"
+                                        <span t-if="!bar.milestone" class="o_gantt_soft_bar_label" t-esc="bar.label"/>
+                                        <span t-if="props.canEdit and !bar.collapsedGroup and !bar.milestone"
                                               class="o_gantt_soft_bar_handle o_gantt_soft_bar_handle_end"
                                               t-on-pointerdown="(ev) => this.onResizePointerDown(ev, bar, 'end')"/>
                                     </div>

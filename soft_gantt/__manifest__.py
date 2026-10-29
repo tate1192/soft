@@ -3,8 +3,9 @@
     'version': '19.0.1.2.0',
     'summary': 'Native Gantt / timeline view type for Odoo 19 Community: bars '
                'read their dates from the view itself, search and filters drive '
-               'the records, bars can be dragged to reschedule. No Enterprise, '
-               'no vendored JavaScript library, no business dependency.',
+               'the records, bars can be dragged to reschedule, milestones, '
+               'dependency arrows, grouping and CSV export. No Enterprise, no '
+               'vendored JavaScript library, no business dependency.',
     'author': 'Softteknik Bilişim',
     'website': 'https://softteknik.com',
     'license': 'AGPL-3',

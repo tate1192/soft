@@ -39,6 +39,8 @@ GANTT_SOFT_VALID_ATTRIBUTES = frozenset({
     'label',
     'progress',
     'color',
+    'milestone',
+    'dependencies',
     'default_order',
     'default_range',
     'group_by',
@@ -56,6 +58,12 @@ GANTT_SOFT_FIELD_ATTRIBUTES = {
     'label': ('char', 'text', 'selection', 'integer', 'float', 'many2one'),
     'progress': ('float', 'integer'),
     'color': ('integer',),
+    # A record flagged by this field is drawn as a milestone (a diamond on its
+    # date) instead of a bar.
+    'milestone': ('boolean',),
+    # The relational list holding the records that must finish before this one:
+    # the client draws an arrow from each of them.
+    'dependencies': ('many2many', 'one2many'),
     # The row a record is drawn on. A name, a team, a status: something with
     # few distinct values. A date is the timeline itself and a float would give
     # one row per value, so both are refused.
@@ -77,7 +85,7 @@ GANTT_SOFT_FIELD_NODE_TYPES = (
 )
 
 #: The scales a Gantt timeline can be drawn with.
-GANTT_SOFT_SCALES = ('day', 'week', 'month')
+GANTT_SOFT_SCALES = ('day', 'week', 'month', 'quarter', 'year')
 
 #: The calendar units a window can be aligned on. `quarter` and `year` are
 #: drawn with month columns, so they cost nothing extra.
@@ -143,6 +151,22 @@ class IrUiView(models.Model):
                     ),
                     node,
                 )
+
+        # The dependencies list must point back at the view's own model: an
+        # arrow can only join two bars that this view draws.
+        dependencies = node.get('dependencies')
+        dependencies_field = model_fields.get(dependencies) if dependencies else None
+        if dependencies_field and dependencies_field.comodel_name != name_manager.model._name:
+            self._raise_view_error(
+                _(
+                    "Field %(field)r used as dependencies in a gantt_soft view "
+                    "must point at %(model)s, not at %(comodel)s.",
+                    field=dependencies,
+                    model=name_manager.model._name,
+                    comodel=dependencies_field.comodel_name,
+                ),
+                node,
+            )
 
         for attribute in ('date_start', 'date_stop'):
             if not node.get(attribute):
