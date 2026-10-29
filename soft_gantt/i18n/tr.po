@@ -1,0 +1,360 @@
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* soft_gantt
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 19.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-29 15:59+0000\n"
+"PO-Revision-Date: \n"
+"Last-Translator: Softteknik Bilisim <https://softteknik.com>\n"
+"Language-Team: Turkish\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "%s (%s)"
+msgstr "%s (%s)"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "%s record(s)"
+msgstr "%s kayıt"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "%s record(s) without a date"
+msgstr "Tarihi olmayan %s kayıt"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid "A gantt_soft view can only contain <field> nodes, got <%(tag)s>."
+msgstr ""
+"Bir gantt_soft görünümü yalnızca <field> düğümleri içerebilir, <%(tag)s> "
+"bulundu."
+
+#. module: soft_gantt
+#: model:ir.model,name:soft_gantt.model_ir_actions_act_window_view
+msgid "Action Window View"
+msgstr "Eylem Pencere Görünümü"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
+msgid "CSV"
+msgstr "CSV"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_popover.xml:0
+msgid "Close"
+msgstr "Kapat"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Collapse group"
+msgstr "Grubu daralt"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Day"
+msgstr "Gün"
+
+#. module: soft_gantt
+#: model:ir.model.fields,field_description:soft_gantt.field_ir_actions_act_window_view__display_name
+#: model:ir.model.fields,field_description:soft_gantt.field_ir_ui_view__display_name
+msgid "Display Name"
+msgstr "Görünen Ad"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
+msgid "Download the records of this period as CSV"
+msgstr "Bu dönemin kayıtlarını CSV olarak indir"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Duration (days)"
+msgstr "Süre (gün)"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Expand group"
+msgstr "Grubu genişlet"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Field %(field)r of type %(type)s cannot be declared in a gantt_soft view."
+msgstr ""
+"%(field)r alanı (%(type)s türünde) bir gantt_soft görünümünde bildirilemez."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Field %(field)r used as %(attribute)s in a gantt_soft view must be of type "
+"%(types)s, not %(type)s."
+msgstr ""
+"Bir gantt_soft görünümünde %(attribute)s olarak kullanılan %(field)r alanı "
+"%(types)s türünde olmalı, %(type)s değil."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Field %(field)r used as dependencies in a gantt_soft view must point at "
+"%(model)s, not at %(comodel)s."
+msgstr ""
+"Bir gantt_soft görünümünde dependencies olarak kullanılan %(field)r alanı "
+"%(model)s modelini göstermeli, %(comodel)s modelini değil."
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
+msgid "Fit"
+msgstr "Sığdır"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid ""
+"Fitted on the first %s records of this search; narrow it to see the rest."
+msgstr ""
+"Bu aramanın ilk %s kaydına göre sığdırıldı; kalanını görmek için aramayı "
+"daraltın."
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
+msgid "Frame every record of the search"
+msgstr "Aramanın tüm kayıtlarını çerçevele"
+
+#. module: soft_gantt
+#: model:ir.model.fields.selection,name:soft_gantt.selection__ir_actions_act_window_view__view_mode__gantt_soft
+#: model:ir.model.fields.selection,name:soft_gantt.selection__ir_ui_view__type__gantt_soft
+msgid "Gantt"
+msgstr "Gantt"
+
+#. module: soft_gantt
+#: model:ir.model.fields,field_description:soft_gantt.field_ir_actions_act_window_view__id
+#: model:ir.model.fields,field_description:soft_gantt.field_ir_ui_view__id
+msgid "ID"
+msgstr "Kimlik"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid attribute(s) %(invalid)s in gantt_soft view. Valid attributes are: "
+"%(valid)s"
+msgstr ""
+"gantt_soft görünümünde geçersiz öznitelik(ler): %(invalid)s. Geçerli "
+"öznitelikler: %(valid)s"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid default_range %(range)r in gantt_soft view. Valid ranges are: "
+"%(ranges)s"
+msgstr ""
+"gantt_soft görünümünde geçersiz default_range: %(range)r. Geçerli aralıklar:"
+" %(ranges)s"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid mode %(mode)r in gantt_soft view. It must be one of the view's "
+"scales: %(scales)s"
+msgstr ""
+"gantt_soft görünümünde geçersiz mode: %(mode)r. Görünümün ölçeklerinden biri"
+" olmalı: %(scales)s"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid scale(s) %(invalid)s in gantt_soft view. Valid scales are: "
+"%(scales)s"
+msgstr ""
+"gantt_soft görünümünde geçersiz ölçek(ler): %(invalid)s. Geçerli ölçekler: "
+"%(scales)s"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Milestone"
+msgstr "Kilometre taşı"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Month"
+msgstr "Ay"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Name"
+msgstr "Ad"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
+msgid "New"
+msgstr "Yeni"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Next period"
+msgstr "Sonraki dönem"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "No"
+msgstr "Hayır"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.xml:0
+msgid "No record carries a date yet: set one to see it on the timeline."
+msgstr ""
+"Henüz tarihi olan kayıt yok: zaman çizelgesinde görmek için bir tarih girin."
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "No record of this search carries a date to fit."
+msgstr "Bu aramada tarihli kayıt yok, sığdırılacak bir aralık bulunamadı."
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Not set"
+msgstr "Belirtilmemiş"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.xml:0
+msgid "Nothing to schedule."
+msgstr "Planlanacak kayıt yok."
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_popover.xml:0
+msgid "Open"
+msgstr "Aç"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
+msgid "Period"
+msgstr "Dönem"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Previous period"
+msgstr "Önceki dönem"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Quarter"
+msgstr "Çeyrek"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Show the period containing today"
+msgstr "Bugünü içeren dönemi göster"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid "The %(attribute)s attribute is required in a gantt_soft view."
+msgstr "gantt_soft görünümünde %(attribute)s özniteliği zorunludur."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The limit of a gantt_soft view must be a positive integer, got %(limit)r."
+msgstr ""
+"gantt_soft görünümünün limit değeri pozitif bir tam sayı olmalı, %(limit)r "
+"verildi."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The scales attribute of a gantt_soft view must list at least one of: "
+"%(scales)s"
+msgstr ""
+"gantt_soft görünümünün scales özniteliği en az birini listelemeli: "
+"%(scales)s"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Today"
+msgstr "Bugün"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Unknown field %(field)r used as %(attribute)s in a gantt_soft view of "
+"%(model)s."
+msgstr ""
+"gantt_soft görünümünde (%(model)s) %(attribute)s olarak kullanılan %(field)r"
+" alanı bilinmiyor."
+
+#. module: soft_gantt
+#: model:ir.model,name:soft_gantt.model_ir_ui_view
+msgid "View"
+msgstr "Görünüm"
+
+#. module: soft_gantt
+#: model:ir.model.fields,field_description:soft_gantt.field_ir_actions_act_window_view__view_mode
+#: model:ir.model.fields,field_description:soft_gantt.field_ir_ui_view__type
+msgid "View Type"
+msgstr "Görünüm Tipi"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Week"
+msgstr "Hafta"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "Year"
+msgstr "Yıl"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Yes"
+msgstr "Evet"
