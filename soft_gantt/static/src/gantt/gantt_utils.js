@@ -8,9 +8,9 @@
  *   `serializeOdooDate` writes it back unchanged, so a task never shifts by a
  *   day when it is dragged.
  * - A `date` record carries a calendar day, with no timezone. It is read and
- *   written as the user's own day (luxon's default zone, which Odoo sets from
- *   the user), so a deadline of 2026-03-05 is that day in Turkey and that day in
- *   New York, not a UTC midnight that lands on the 4th in the Americas.
+ *   written as the user's own day (`user.tz`, with the browser zone as a
+ *   fallback), so a deadline of 2026-03-05 is that day in Turkey and that day
+ *   in New York, not a UTC midnight that lands on the 4th in the Americas.
  * - The *timeline* is the calendar of the person reading it. The columns of a
  *   Gantt are the hours of their day, the days of their week, the weeks of their
  *   month, so a job starting at 07:00 in Turkey must land in the 07:00 column and
@@ -23,6 +23,7 @@
  */
 
 import { formatDate } from "@web/core/l10n/dates";
+import { user } from "@web/core/user";
 
 const { DateTime } = luxon;
 
@@ -30,6 +31,16 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** One hour, in milliseconds: the finest unit a timeline draws. */
 export const HOUR_MS = 60 * 60 * 1000;
+
+/** The Odoo user's timezone, with the browser zone as a fallback. */
+export function getUserZone() {
+    return user.tz || luxon.Settings.defaultZone.name;
+}
+
+/** A timestamp read in the Odoo user's timezone. */
+export function dateTimeInUserZone(timestamp) {
+    return DateTime.fromMillis(timestamp, { zone: getUserZone() });
+}
 
 /**
  * Above this many cells a timeline stops being readable, so the finest unit is
@@ -114,14 +125,14 @@ export function parseOdooFieldDate(value, fieldType) {
     }
     if (typeof value === "number") {
         return Number.isFinite(value)
-            ? DateTime.fromMillis(value).startOf("day").toMillis()
+            ? dateTimeInUserZone(value).startOf("day").toMillis()
             : null;
     }
     const [year, month, day] = String(value).trim().slice(0, 10).split("-").map(Number);
     if (!year || !month || !day) {
         return null;
     }
-    const date = DateTime.fromObject({ year, month, day });
+    const date = DateTime.fromObject({ year, month, day }, { zone: getUserZone() });
     return date.isValid ? date.toMillis() : null;
 }
 
@@ -152,7 +163,7 @@ function formatOdooDateTime(timestamp) {
  */
 export function serializeOdooDate(timestamp, fieldType) {
     if (fieldType === "date") {
-        return DateTime.fromMillis(timestamp).toISODate();
+        return dateTimeInUserZone(timestamp).toISODate();
     }
     return formatOdooDateTime(timestamp);
 }
@@ -177,15 +188,14 @@ export function addFieldDays(timestamp, days, fieldType) {
 // ---------------------------------------------------------------------
 // The user's calendar
 //
-// Everything below is bound to the timezone the user reads the screen in
-// (`luxon`'s default zone, which Odoo sets from the user). It is what the
-// columns of the timeline are made of; the UTC helpers above stay for the
+// Everything below is bound to the timezone in the Odoo user's profile. It is
+// what the columns of the timeline are made of; the UTC helpers above stay for the
 // datetime record values themselves.
 // ---------------------------------------------------------------------
 
 /** Start of the user's local day containing the timestamp. */
 export function startOfLocalDay(timestamp) {
-    return DateTime.fromMillis(timestamp).startOf("day").toMillis();
+    return dateTimeInUserZone(timestamp).startOf("day").toMillis();
 }
 
 /**
@@ -196,38 +206,38 @@ export function startOfLocalDay(timestamp) {
  * luxon so a week containing a DST switch is still seven local days.
  */
 export function startOfLocalWeek(timestamp) {
-    const day = DateTime.fromMillis(timestamp).startOf("day");
+    const day = dateTimeInUserZone(timestamp).startOf("day");
     return day.minus({ days: day.weekday - 1 }).toMillis();
 }
 
 /** First day of the user's local month containing the timestamp. */
 export function startOfLocalMonth(timestamp) {
-    return DateTime.fromMillis(timestamp).startOf("month").toMillis();
+    return dateTimeInUserZone(timestamp).startOf("month").toMillis();
 }
 
 /** First day of the user's local quarter containing the timestamp. */
 function startOfLocalQuarter(timestamp) {
-    return DateTime.fromMillis(timestamp).startOf("quarter").toMillis();
+    return dateTimeInUserZone(timestamp).startOf("quarter").toMillis();
 }
 
 /** First day of the user's local year containing the timestamp. */
 function startOfLocalYear(timestamp) {
-    return DateTime.fromMillis(timestamp).startOf("year").toMillis();
+    return dateTimeInUserZone(timestamp).startOf("year").toMillis();
 }
 
 /** Shift a timestamp by whole local days, keeping the local time of day. */
 export function addLocalDays(timestamp, days) {
-    return DateTime.fromMillis(timestamp).plus({ days }).toMillis();
+    return dateTimeInUserZone(timestamp).plus({ days }).toMillis();
 }
 
 /** Shift a timestamp by whole local months, always landing on the 1st. */
 export function addLocalMonths(timestamp, months) {
-    return DateTime.fromMillis(timestamp).startOf("month").plus({ months }).toMillis();
+    return dateTimeInUserZone(timestamp).startOf("month").plus({ months }).toMillis();
 }
 
 /** Is the timestamp inside a local weekend (Saturday or Sunday)? */
 function isLocalWeekend(timestamp) {
-    const weekday = DateTime.fromMillis(timestamp).weekday; // 1 = Monday .. 7 = Sunday
+    const weekday = dateTimeInUserZone(timestamp).weekday; // 1 = Monday .. 7 = Sunday
     return weekday === 6 || weekday === 7;
 }
 
@@ -235,7 +245,7 @@ function isLocalWeekend(timestamp) {
 function startOfLocalUnit(timestamp, unit) {
     switch (unit) {
         case "hour":
-            return DateTime.fromMillis(timestamp).startOf("hour").toMillis();
+            return dateTimeInUserZone(timestamp).startOf("hour").toMillis();
         case "week":
             return startOfLocalWeek(timestamp);
         case "month":
@@ -256,9 +266,9 @@ function addLocalUnit(timestamp, unit, step = 1) {
             // Luxon adds an hour of wall clock, so the DST hour that does not
             // exist (or happens twice) is skipped or repeated the way the
             // calendar does it, unlike millisecond arithmetic.
-            return DateTime.fromMillis(timestamp).plus({ hours: step }).toMillis();
+            return dateTimeInUserZone(timestamp).plus({ hours: step }).toMillis();
         case "week":
-            return DateTime.fromMillis(timestamp).plus({ weeks: step }).toMillis();
+            return dateTimeInUserZone(timestamp).plus({ weeks: step }).toMillis();
         case "month":
             return addLocalMonths(timestamp, step);
         case "quarter":
@@ -408,8 +418,8 @@ export function shiftWindow(reference, range = "month", steps = 1) {
  * @param {number} end window end timestamp, excluded
  */
 export function formatWindowLabel(range, start, end) {
-    const from = DateTime.fromMillis(start);
-    const to = DateTime.fromMillis(end - 1);
+    const from = dateTimeInUserZone(start);
+    const to = dateTimeInUserZone(end - 1);
     switch (range) {
         case "day":
             return formatDate(from, { format: "dd MMM yyyy" });
@@ -550,7 +560,10 @@ export function ensureDuration(start, stop, unit) {
         return { start, stop };
     }
     if (stop === null || stop === undefined || stop <= start) {
-        return { start, stop: start + (unit === "hour" ? HOUR_MS : DAY_MS) };
+        return {
+            start,
+            stop: unit === "hour" ? start + HOUR_MS : addLocalDays(start, 1),
+        };
     }
     return { start, stop };
 }
@@ -558,9 +571,10 @@ export function ensureDuration(start, stop, unit) {
 /**
  * Position of a bar inside a range, as percentages.
  *
- * The two ends are clamped to the range, so a record that starts before the
- * window (or ends after it) is drawn as reaching the edge instead of
- * disappearing, and a zero length record is given one day so it stays visible.
+ * The two ends are clamped to the range before the width is calculated, so a
+ * record that starts before the window (or ends after it) reaches the edge
+ * without inflating its visible duration. A record outside the range has no
+ * geometry, and a zero length record is given one day so it stays visible.
  */
 export function barGeometry(start, stop, rangeStart, rangeEnd) {
     const span = rangeEnd - rangeStart;
@@ -575,11 +589,14 @@ export function barGeometry(start, stop, rangeStart, rangeEnd) {
     if (to === from) {
         to = from + DAY_MS;
     }
-    const left = ((from - rangeStart) / span) * 100;
-    const width = ((to - from) / span) * 100;
-    const clampedLeft = Math.max(0, Math.min(100, left));
-    const clampedWidth = Math.max(0.5, Math.min(100 - clampedLeft, width));
-    return { left: clampedLeft, width: clampedWidth };
+    const visibleStart = Math.max(from, rangeStart);
+    const visibleEnd = Math.min(to, rangeEnd);
+    if (visibleEnd <= visibleStart) {
+        return null;
+    }
+    const left = ((visibleStart - rangeStart) / span) * 100;
+    const width = ((visibleEnd - visibleStart) / span) * 100;
+    return { left, width: Math.max(0.5, Math.min(100 - left, width)) };
 }
 
 /**
@@ -610,20 +627,26 @@ export function relationIds(value) {
 /**
  * The window covering every record, padded to whole days.
  *
- * The two ends are the earliest start and the latest stop of the set: both are
- * pushed to the boundary of the user's day, so a bar ending at 12:00 does not
- * leave the afternoon outside the fitted window.
+ * Every available date participates, so a record carrying only a start or only
+ * a stop still belongs in the fitted range. Both ends are pushed to the
+ * boundary of the user's day, without adding an empty day after a midnight end.
  *
  * @param {number[]} starts
  * @param {number[]} stops
  * @returns {{start: number, end: number}|null} null when there is nothing to fit
  */
 export function fitWindow(starts, stops) {
-    if (!starts.length || !stops.length) {
+    const dates = [...starts, ...stops];
+    if (!dates.length) {
         return null;
     }
-    const start = startOfLocalDay(Math.min(...starts));
-    const end = addLocalDays(startOfLocalDay(Math.max(...stops)), 1);
+    const start = startOfLocalDay(Math.min(...dates));
+    const last = Math.max(...dates);
+    const lastDay = startOfLocalDay(last);
+    // A half-open interval ending exactly at midnight already includes every
+    // day it touches. A start at that instant still needs its own day included.
+    const endsAtMidnight = last === lastDay && last > start && !starts.includes(last);
+    const end = endsAtMidnight ? lastDay : addLocalDays(lastDay, 1);
     return end > start ? { start, end } : null;
 }
 
@@ -639,7 +662,13 @@ export function fitWindow(starts, stops) {
 export function csvEscape(value) {
     // `false` is Odoo's empty value, not the text "false": a boolean column
     // would otherwise print it in every empty cell.
-    const text = value === null || value === undefined || value === false ? "" : String(value);
+    let text = value === null || value === undefined || value === false ? "" : String(value);
+    // Excel evaluates formulas even inside quoted CSV cells. Prefix user text
+    // with an apostrophe, including formulas hidden behind whitespace/control
+    // characters. Numeric values remain numeric, including negative numbers.
+    if (typeof value === "string" && /^[\s\x00-\x1F]*[=+\-@]/.test(text)) {
+        text = `'${text}`;
+    }
     return /[";\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 

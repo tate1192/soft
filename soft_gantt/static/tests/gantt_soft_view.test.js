@@ -1,6 +1,7 @@
-import { after, describe, expect, getFixture, test } from "@odoo/hoot";
+import { after, beforeEach, describe, expect, getFixture, test } from "@odoo/hoot";
 import { click, queryAll, queryOne } from "@odoo/hoot-dom";
 import { animationFrame } from "@odoo/hoot-mock";
+import { user } from "@web/core/user";
 import {
     defineModels,
     fields,
@@ -32,6 +33,7 @@ class Task extends models.Model {
         { id: 2, name: "Only an end", date_start: false, date_deadline: "2026-03-10 00:00:00" },
         { id: 3, name: "Only a start", date_start: "2026-03-20 00:00:00", date_deadline: false },
         { id: 4, name: "Out of the window", date_start: "2026-02-01 00:00:00", date_deadline: "2026-02-03 00:00:00" },
+        { id: 5, name: "Ends at the window start", date_start: "2026-02-01 00:00:00", date_deadline: "2026-03-01 00:00:00" },
     ];
 
     _views = {
@@ -59,6 +61,14 @@ class Task extends models.Model {
 }
 
 defineModels([Task]);
+
+const ORIGINAL_TIMEZONE = user.tz;
+beforeEach(() => {
+    user.updateContext({ tz: "UTC" });
+});
+after(() => {
+    user.updateContext({ tz: ORIGINAL_TIMEZONE });
+});
 
 describe.current.tags("desktop");
 
@@ -165,19 +175,12 @@ test("the fit button frames the whole search", async () => {
         state: { ...MARCH_STATE },
     });
     expect(".o_gantt_soft_button_fit").toHaveCount(1);
-    // The records of the mocked model span 2026-03-02 to 2026-03-20, so the
-    // fitted window is named by those two ends rather than by a month.
+    // The records span 2026-02-01 to the start-only record on 2026-03-20.
     await click(queryOne(".o_gantt_soft_button_fit"));
-    // Fitting reads the two date fields of the search first, so the label
-    // becomes the two ends of the records' span (2026-02-01 to 2026-03-10 in
-    // the mocked data) instead of a month name, one RPC later.
-    // Fitting reads the two date fields of the search first, so the label
-    // becomes the two ends of the records' span (2026-02-01 to 2026-03-10 in
-    // the mocked data) instead of a month name, one RPC later.
     await animationFrame();
     await animationFrame();
     expect(queryOne(".o_gantt_soft_window_label").textContent.trim()).toBe(
-        "01 Feb 2026 - 10 Mar 2026"
+        "01 Feb 2026 - 20 Mar 2026"
     );
 });
 

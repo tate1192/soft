@@ -9,6 +9,7 @@ import {
     addLocalMonths,
     barGeometry,
     buildTimeline,
+    dateTimeInUserZone,
     ensureDuration,
     fieldText,
     packLanes,
@@ -19,8 +20,6 @@ import {
     startOfLocalMonth,
     startOfLocalWeek,
 } from "./gantt_utils";
-
-const { DateTime } = luxon;
 
 /** Number of colours defined for the optional `color` field. */
 const COLOR_COUNT = 12;
@@ -911,12 +910,11 @@ export class GanttSoftRenderer extends Component {
      * Label of one cell, read at the unit the timeline is drawn with: the hour
      * of an hour cell, the day and its weekday of a day cell, and so on.
      *
-     * The timestamp is read in the user's timezone: `DateTime.fromMillis` uses
-     * luxon's default zone, which Odoo sets from the user, so a 07:00 start in
-     * Turkey is labelled 07:00 rather than 04:00.
+     * The timestamp is read in the Odoo user's profile timezone, so a 07:00
+     * start in Turkey is labelled 07:00 rather than 04:00.
      */
     _cellLabel(timestamp, unit) {
-        const date = DateTime.fromMillis(timestamp);
+        const date = dateTimeInUserZone(timestamp);
         switch (unit) {
             case "hour":
                 return formatDate(date, { format: "HH:mm" });
@@ -932,10 +930,10 @@ export class GanttSoftRenderer extends Component {
 
     /** Label of a band: the week it covers, its day, its month, its quarter. */
     _bandLabel(timestamp, unit) {
-        const date = DateTime.fromMillis(timestamp);
+        const date = dateTimeInUserZone(timestamp);
         switch (unit) {
             case "week": {
-                const end = DateTime.fromMillis(addLocalDays(timestamp, 6));
+                const end = dateTimeInUserZone(addLocalDays(timestamp, 6));
                 return `${formatDate(date, { format: "dd MMM" })} - ${formatDate(end, {
                     format: "dd MMM",
                 })}`;
@@ -956,8 +954,8 @@ export class GanttSoftRenderer extends Component {
     }
 
     _formatRange(start, stop) {
-        const from = DateTime.fromMillis(start);
-        const to = DateTime.fromMillis(stop);
+        const from = dateTimeInUserZone(start);
+        const to = dateTimeInUserZone(stop);
         return `${formatDate(from, { format: "dd MMM yyyy" })} -> ${formatDate(to, {
             format: "dd MMM yyyy",
         })}`;
@@ -987,7 +985,7 @@ export class GanttSoftRenderer extends Component {
     _milestoneTitle(row) {
         const lines = [
             row.record.display_name || row.label,
-            `${_t("Milestone")}: ${formatDate(DateTime.fromMillis(row.start), {
+            `${_t("Milestone")}: ${formatDate(dateTimeInUserZone(row.start), {
                 format: "dd MMM yyyy",
             })}`,
         ];
