@@ -1,4 +1,5 @@
 import { after, beforeEach, describe, expect, test } from "@odoo/hoot";
+import { user } from "@web/core/user";
 
 import {
     WINDOW_RANGES,
@@ -19,11 +20,14 @@ const iso = (timestamp) => new Date(timestamp).toISOString();
  * timezone set their own zone inside the test.
  */
 const ORIGINAL_ZONE = luxon.Settings.defaultZone;
+const ORIGINAL_TIMEZONE = user.tz;
 beforeEach(() => {
     luxon.Settings.defaultZone = "UTC";
+    user.updateContext({ tz: "UTC" });
 });
 after(() => {
     luxon.Settings.defaultZone = ORIGINAL_ZONE;
+    user.updateContext({ tz: ORIGINAL_TIMEZONE });
 });
 
 describe("windowRange", () => {
@@ -178,14 +182,14 @@ describe("the user's calendar", () => {
     test("a day window is the user's local day", () => {
         // 2026-03-03T00:00Z is 03:00 in Istanbul: the local day it belongs to
         // began three hours earlier, at 21:00Z on the 2nd.
-        luxon.Settings.defaultZone = ISTANBUL;
+        user.updateContext({ tz: ISTANBUL });
         const { start, end } = windowRange(Date.parse("2026-03-03T00:00:00Z"), "day");
         expect(iso(start)).toBe("2026-03-02T21:00:00.000Z");
         expect(iso(end)).toBe("2026-03-03T21:00:00.000Z");
     });
 
     test("a week window starts on the user's local Monday", () => {
-        luxon.Settings.defaultZone = ISTANBUL;
+        user.updateContext({ tz: ISTANBUL });
         // 2026-03-03 is a Tuesday; the local Monday of that week is the 2nd,
         // and its local midnight is 2026-03-01T21:00Z.
         const { start, end } = windowRange(Date.parse("2026-03-03T00:00:00Z"), "week");
@@ -194,7 +198,7 @@ describe("the user's calendar", () => {
     });
 
     test("a month window is the user's local month", () => {
-        luxon.Settings.defaultZone = ISTANBUL;
+        user.updateContext({ tz: ISTANBUL });
         // 22:00Z on the last day of March is 01:00 on the 1st of April there.
         const { start, end } = windowRange(Date.parse("2026-03-31T22:00:00Z"), "month");
         expect(iso(start)).toBe("2026-03-31T21:00:00.000Z");
@@ -202,7 +206,7 @@ describe("the user's calendar", () => {
     });
 
     test("moving a day forward moves exactly one local day", () => {
-        luxon.Settings.defaultZone = ISTANBUL;
+        user.updateContext({ tz: ISTANBUL });
         const reference = Date.parse("2026-03-03T00:00:00Z");
         // The same local wall clock, one local day later, not 24h earlier or
         // later as a millisecond shift across a DST change would give.
@@ -214,7 +218,7 @@ describe("the user's calendar", () => {
     test("consecutive local days still touch, across a DST switch", () => {
         // Europe/Brussels switches to summer time on 2026-03-29: the 29th is a
         // 23 hour day. Adding a day must still land on the next local midnight.
-        luxon.Settings.defaultZone = "Europe/Brussels";
+        user.updateContext({ tz: "Europe/Brussels" });
         const before = windowRange(Date.parse("2026-03-28T12:00:00Z"), "day");
         const after = windowRange(Date.parse("2026-03-29T12:00:00Z"), "day");
         expect(after.start).toBe(before.end);
