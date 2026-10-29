@@ -19,6 +19,8 @@ const MODELS = {
             color_index: { type: "integer" },
             user_id: { type: "many2one", relation: "res.users" },
             tag_ids: { type: "many2many", relation: "project.tags" },
+            depends_on: { type: "many2many", relation: "project.task" },
+            is_milestone: { type: "boolean" },
             state: {
                 type: "selection",
                 selection: [
@@ -239,5 +241,51 @@ describe("GanttSoftArchParser", () => {
                 '<gantt_soft date_start="date_start" date_stop="date_deadline"><field name="tag_ids"/></gantt_soft>'
             )
         ).toThrow(/cannot be declared in a gantt_soft view/);
+    });
+
+    test("reads the milestone field", () => {
+        const archInfo = parse(
+            '<gantt_soft date_start="date_start" date_stop="date_deadline" milestone="is_milestone"/>'
+        );
+        expect(archInfo.milestoneField).toBe("is_milestone");
+    });
+
+    test("refuses a milestone field that is not a boolean", () => {
+        expect(() =>
+            parse('<gantt_soft date_start="date_start" date_stop="date_deadline" milestone="name"/>')
+        ).toThrow(/must be of type boolean/);
+    });
+
+    test("reads the dependencies list", () => {
+        const archInfo = parse(
+            '<gantt_soft date_start="date_start" date_stop="date_deadline" dependencies="depends_on"/>'
+        );
+        expect(archInfo.dependenciesField).toBe("depends_on");
+    });
+
+    test("refuses a dependencies field that points at another model", () => {
+        // An arrow joins two bars of this view: a list of tags has nothing to
+        // join it to.
+        expect(() =>
+            parse(
+                '<gantt_soft date_start="date_start" date_stop="date_deadline" dependencies="tag_ids"/>'
+            )
+        ).toThrow(/must point at project.task/);
+    });
+
+    test("refuses a dependencies field that is not a relational list", () => {
+        expect(() =>
+            parse(
+                '<gantt_soft date_start="date_start" date_stop="date_deadline" dependencies="state"/>'
+            )
+        ).toThrow(/must be of type many2many\/one2many/);
+    });
+
+    test("accepts the quarter and year scales", () => {
+        const archInfo = parse(
+            '<gantt_soft date_start="date_start" date_stop="date_deadline" scales="day,week,month,quarter,year" mode="quarter"/>'
+        );
+        expect(archInfo.scales).toEqual(["day", "week", "month", "quarter", "year"]);
+        expect(archInfo.scale).toBe("quarter");
     });
 });

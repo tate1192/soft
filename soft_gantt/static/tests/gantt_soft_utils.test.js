@@ -2,8 +2,13 @@ import { after, beforeEach, describe, expect, test } from "@odoo/hoot";
 
 import {
     addFieldDays,
+    buildCsv,
+    csvEscape,
     fieldText,
+    fitWindow,
+    formatWindowLabel,
     parseOdooFieldDate,
+    relationIds,
     serializeOdooDate,
 } from "@soft_gantt/gantt/gantt_utils";
 
@@ -99,5 +104,63 @@ describe("date and datetime fields", () => {
         expect(parseOdooFieldDate(false, "date")).toBe(null);
         expect(parseOdooFieldDate(null, "datetime")).toBe(null);
         expect(parseOdooFieldDate("", "date")).toBe(null);
+    });
+});
+
+describe("relationIds", () => {
+    test("reads the ids of the Odoo 17+ list of objects", () => {
+        expect(
+            relationIds([
+                { id: 3, display_name: "Pour" },
+                { id: 9, display_name: "Cure" },
+            ])
+        ).toEqual([3, 9]);
+    });
+
+    test("reads the older [id, name] pairs", () => {
+        expect(relationIds([[3, "Pour"], [9, "Cure"]])).toEqual([3, 9]);
+    });
+
+    test("an empty list, or a half-written one, gives nothing", () => {
+        expect(relationIds(false)).toEqual([]);
+        expect(relationIds([])).toEqual([]);
+        expect(relationIds([{ id: false }])).toEqual([]);
+    });
+});
+
+describe("fitWindow", () => {
+    test("covers the earliest start and the latest stop, padded to whole days", () => {
+        const start = parseOdooFieldDate("2026-03-02 08:00:00", "datetime");
+        const stop = parseOdooFieldDate("2026-03-05 12:00:00", "datetime");
+        const window = fitWindow([start, start + 1000], [stop]);
+        expect(serializeOdooDate(window.start, "datetime")).toBe("2026-03-02 00:00:00");
+        expect(serializeOdooDate(window.end, "datetime")).toBe("2026-03-06 00:00:00");
+    });
+
+    test("nothing to fit gives no window", () => {
+        expect(fitWindow([], [])).toBe(null);
+    });
+
+    test("a fitted window is named by its two ends", () => {
+        const start = parseOdooFieldDate("2026-03-02", "date");
+        const end = parseOdooFieldDate("2026-03-06", "date");
+        expect(formatWindowLabel("fit", start, end)).toBe("02 Mar 2026 - 05 Mar 2026");
+    });
+});
+
+describe("CSV export", () => {
+    test("a cell holding the separator, a quote or a newline is quoted", () => {
+        expect(csvEscape("Kaba yıkama; ince yıkama")).toBe('"Kaba yıkama; ince yıkama"');
+        expect(csvEscape('12" boru')).toBe('"12"" boru"');
+        expect(csvEscape("iki\nsatır")).toBe('"iki\nsatır"');
+        expect(csvEscape("Bakım")).toBe("Bakım");
+        expect(csvEscape(false)).toBe("");
+    });
+
+    test("the document carries a byte order mark and one line per row", () => {
+        const csv = buildCsv(["Name", "Start"], [["Bakım", "02 Mar 2026"]]);
+        // Without the BOM Excel reads a UTF-8 file as the local code page.
+        expect(csv.startsWith("\ufeff")).toBe(true);
+        expect(csv.split("\r\n")).toEqual(["\ufeffName;Start", "Bakım;02 Mar 2026"]);
     });
 });

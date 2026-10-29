@@ -82,8 +82,14 @@ Arch attributes
 ``progress``           optional Float/Integer drawn as a progress bar
 ``color``              optional Integer used for the bar colour (the Odoo
                        colour index, 0 to 11)
-``mode``               initial scale: ``day``, ``week`` or ``month`` (month);
-                       it must be one of the offered ``scales``
+``milestone``          optional Boolean field: a record flagged by it is drawn
+                       as a diamond on its start date instead of a bar
+``dependencies``       optional Many2many/One2many field pointing back at the
+                       same model: the records it lists are the ones that must
+                       finish first, and an arrow joins them to this record
+``mode``               initial scale: ``day``, ``week``, ``month``,
+                       ``quarter`` or ``year`` (month); it must be one of the
+                       offered ``scales``
 ``scales``             comma separated scales offered to the user; unknown
                        names are refused
 ``default_range``      initial window: ``day``, ``week``, ``month``,
@@ -104,8 +110,9 @@ Arch attributes
 Every attribute that can be checked without a browser is validated when the
 view is installed: a misspelled field name, a Char field used as a date, an
 unknown attribute, a bad ``mode`` or ``scales``, a non-positive ``limit``, a
-read-only field used as a group or a declared ``<field>`` of an unrenderable
-type refuses the view with a message that names the problem. The client parser
+read-only field used as a group, a ``milestone`` field that is not a Boolean, a
+``dependencies`` list that points at another model, or a declared ``<field>`` of
+an unrenderable type refuses the view with a message that names the problem. The client parser
 runs the same checks on views built at runtime, so a broken view never shows an
 empty schedule instead of an error.
 
@@ -123,7 +130,8 @@ Behaviour
   first ones are drawn.
 * **A scale is a zoom, and the header has two levels.** The control panel
   buttons zoom in and out: ``Day`` shows the *hours* of one day, ``Week`` the
-  days of one week, ``Month`` the days of one month. Picking a scale moves the
+  days of one week, ``Month`` the days of one month, ``Quarter`` the weeks of a
+  quarter and ``Year`` the months of a year. Picking a scale moves the
   window to that scale's own length, so the cells stay countable. The header is
   drawn on two levels, the coarse band over the cells, and today is marked by a
   line and a *Today* badge. Should a window ever be too wide for its unit, the
@@ -172,6 +180,16 @@ Behaviour
   the single bar spans the earliest start to the latest stop and shows the
   record count. It cannot be dragged or resized (it does not stand for one
   record), and clicking it unfolds the group again.
+* **A milestone is a point, and a dependency is an arrow.** A record flagged by
+  the ``milestone`` field is drawn as a diamond on its start date: it carries no
+  duration, so it offers no resize grips. A record listing its predecessors in
+  the ``dependencies`` field is joined to them by an arrow, drawn from the end of
+  the predecessor to the start of the record. Both are opt-in: a view that names
+  neither behaves exactly like before.
+* **Fit the search, and export the period.** The control panel offers *Fit*, which
+  widens the window to the span of every record the current search returns, and
+  *CSV*, which downloads the records of the window with the two dates, the
+  duration and the fields the arch declares.
 * **No surprises.** Bars are only draggable when the user may edit, and a failed
   write is reported instead of being swallowed.
 * **Theme safe.** Every colour is a ``$o-gantt-soft-*`` SCSS variable. The light
@@ -191,6 +209,13 @@ Known limitations
   to see the rest.
 * ``date_stop`` is a half-open end: a record ending exactly on a day boundary
   covers the days before it, not the boundary day itself.
+* A dependency arrow is drawn only between two bars the viewport paints: a folded
+  group and a row scrolled out of view have no end to reach, so that pair is left
+  out rather than drawn to nowhere.
+* ``Fit`` reads the two date fields of the search once, bounded to 2000 records.
+  Past that the fitted window describes the first records only, and the view says
+  so in a notification. The first arrow press after a fit moves to the month
+  holding the window, since a fitted window has no calendar unit to step by.
 
 Licence
 =======

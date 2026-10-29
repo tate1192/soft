@@ -413,6 +413,12 @@ export function formatWindowLabel(range, start, end) {
     switch (range) {
         case "day":
             return formatDate(from, { format: "dd MMM yyyy" });
+        case "fit":
+            // A fitted window is whatever the records span: it has two ends,
+            // so it is named by them rather than by a unit.
+            return `${formatDate(from, { format: "dd MMM yyyy" })} - ${formatDate(to, {
+                format: "dd MMM yyyy",
+            })}`;
         case "week":
             return (
                 `${formatDate(from, { format: "dd MMM" })} - ` +
@@ -570,4 +576,100 @@ export function barGeometry(start, stop, rangeStart, rangeEnd) {
     const clampedLeft = Math.max(0, Math.min(100, left));
     const clampedWidth = Math.max(0.5, Math.min(100 - clampedLeft, width));
     return { left: clampedLeft, width: clampedWidth };
+}
+
+/**
+ * The ids a relational list points at.
+ *
+ * A many2many comes as `[{id, display_name}]` from the relational model (the
+ * older `[id, name]` pairs are still handed over by other code paths), so the
+ * arrow code reads the id out of either shape instead of printing an object.
+ *
+ * @param {Array|object|false} value the field value of a record
+ * @returns {number[]}
+ */
+export function relationIds(value) {
+    if (!value) {
+        return [];
+    }
+    const items = Array.isArray(value) ? value : [value];
+    const ids = [];
+    for (const item of items) {
+        const id = item && typeof item === "object" ? item.id ?? item[0] : item;
+        if (typeof id === "number" && Number.isFinite(id)) {
+            ids.push(id);
+        }
+    }
+    return ids;
+}
+
+/**
+ * The window covering every record, padded to whole days.
+ *
+ * The two ends are the earliest start and the latest stop of the set: both are
+ * pushed to the boundary of the user's day, so a bar ending at 12:00 does not
+ * leave the afternoon outside the fitted window.
+ *
+ * @param {number[]} starts
+ * @param {number[]} stops
+ * @returns {{start: number, end: number}|null} null when there is nothing to fit
+ */
+export function fitWindow(starts, stops) {
+    if (!starts.length || !stops.length) {
+        return null;
+    }
+    const start = startOfLocalDay(Math.min(...starts));
+    const end = addLocalDays(startOfLocalDay(Math.max(...stops)), 1);
+    return end > start ? { start, end } : null;
+}
+
+/**
+ * Escape one CSV cell.
+ *
+ * The separator is a semicolon: a Turkish Excel reads a comma separated file as
+ * one column, and the export is meant to be opened, not parsed by a robot.
+ *
+ * @param {*} value
+ * @returns {string}
+ */
+export function csvEscape(value) {
+    // `false` is Odoo's empty value, not the text "false": a boolean column
+    // would otherwise print it in every empty cell.
+    const text = value === null || value === undefined || value === false ? "" : String(value);
+    return /[";\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+/**
+ * A CSV document from a header and a list of rows.
+ *
+ * A byte order mark is prepended: without it Excel reads a UTF-8 file as the
+ * local code page and the Turkish characters come out wrong.
+ *
+ * @param {string[]} header
+ * @param {Array<Array<*>>} rows
+ * @returns {string}
+ */
+export function buildCsv(header, rows) {
+    const lines = [header, ...rows].map((row) => row.map(csvEscape).join(";"));
+    return "\ufeff" + lines.join("\r\n");
+}
+
+/**
+ * Hand a text document to the browser as a download.
+ *
+ * @param {string} filename
+ * @param {string} content
+ * @param {string} mime
+ */
+export function downloadTextFile(filename, content, mime = "text/csv;charset=utf-8") {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // The browser needs the URL to stay alive until the download has started.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

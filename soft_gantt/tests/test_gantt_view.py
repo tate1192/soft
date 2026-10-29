@@ -109,7 +109,7 @@ class TestSoftGanttView(TransactionCase):
 
     def test_invalid_mode_is_refused(self):
         self._assert_arch_is_refused(
-            '<gantt_soft date_start="create_date" date_stop="write_date" mode="year"/>'
+            '<gantt_soft date_start="create_date" date_stop="write_date" mode="decade"/>'
         )
 
     def test_non_numeric_limit_is_refused(self):
@@ -186,6 +186,54 @@ class TestSoftGanttView(TransactionCase):
         )
         self.assertEqual(view.type, 'gantt_soft')
         self.assertEqual(view.model, 'res.company')
+
+    # ------------------------------------------------------------------
+    # Milestones, dependencies and the wider scales
+    # ------------------------------------------------------------------
+
+    def test_milestone_field_is_accepted(self):
+        """A boolean field may mark a record as a milestone."""
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'milestone="is_company"/>'
+        )
+        self.assertEqual(view.type, 'gantt_soft')
+
+    def test_non_boolean_milestone_is_refused(self):
+        """A milestone is a flag: a name is not one."""
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'milestone="name"/>'
+        )
+
+    def test_dependencies_field_is_accepted(self):
+        """A one2many pointing back at the model joins two of its bars."""
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'dependencies="child_ids"/>'
+        )
+        self.assertEqual(view.type, 'gantt_soft')
+
+    def test_dependencies_on_another_model_are_refused(self):
+        """An arrow can only join two bars of the same view."""
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'dependencies="category_id"/>'
+        )
+
+    def test_non_relational_dependencies_are_refused(self):
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'dependencies="name"/>'
+        )
+
+    def test_quarter_and_year_are_offered_as_scales(self):
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'scales="day,week,month,quarter,year" mode="quarter" '
+            'default_range="year"/>'
+        )
+        self.assertEqual(view.type, 'gantt_soft')
 
     # ------------------------------------------------------------------
     # The module is a view type, not a business module
