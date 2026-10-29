@@ -145,7 +145,9 @@ Behaviour
   in time are given a lane each, so the row grows instead of hiding one behind
   the other. Records whose group is unset keep a row of their own ("Not set").
   A many2one group is identified by its id, so two records sharing a name stay
-  apart.
+  apart. A milestone keeps a lane of its own from a bar starting at the same
+  instant: its diamond is drawn around that point, so sharing the lane would put
+  the bar's edge under it.
 * **A bar carries its details.** Clicking a bar opens a card with the two dates
   and every ``<field>`` the arch declares (dates, booleans, selection labels and
   many2one names resolved), and an *Open* button that goes to the form. Moving

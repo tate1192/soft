@@ -476,7 +476,11 @@ export function packLanes(bars) {
         if (lane === -1) {
             lane = laneEnds.length;
         }
-        laneEnds[lane] = bar.stop;
+        // A milestone is a point, drawn as a diamond around that instant rather
+        // than as an interval: its lane stays busy for that one millisecond so a
+        // bar starting at the same moment takes a lane of its own instead of
+        // putting its edge under the diamond.
+        laneEnds[lane] = bar.milestone ? bar.stop + 1 : bar.stop;
         packed.push({ row: bar, lane });
     }
     return { packed, laneCount: Math.max(laneEnds.length, 1) };

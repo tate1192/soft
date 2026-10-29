@@ -86,6 +86,21 @@ describe("windowRange", () => {
         ]);
     });
 
+    test("a milestone keeps its own lane from a bar starting at the same instant", () => {
+        // A milestone is a point: its diamond is drawn around that instant, so a
+        // bar starting exactly there would have its edge under the diamond.
+        const { packed, laneCount } = packLanes([
+            { id: 1, start: at("2026-03-02"), stop: at("2026-03-02"), milestone: true },
+            { id: 2, start: at("2026-03-02"), stop: at("2026-03-05") },
+        ]);
+
+        expect(laneCount).toBe(2);
+        expect(packed.map(({ row, lane }) => [row.id, lane])).toEqual([
+            [1, 0],
+            [2, 1],
+        ]);
+    });
+
     test("records that follow each other share one lane", () => {
         const { laneCount } = packLanes([
             { id: 1, start: at("2026-03-02"), stop: at("2026-03-03") },

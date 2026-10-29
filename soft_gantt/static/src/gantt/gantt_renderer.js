@@ -324,24 +324,17 @@ export class GanttSoftRenderer extends Component {
      * pair is skipped rather than drawn to nowhere. The geometry is in pixels
      * because an SVG stroke cannot be described in percentages without being
      * distorted by the non-uniform scale the coordinates would need.
+     *
+     * The result is deliberately NOT memoised: it is a loop over the painted
+     * bars (a function of the viewport, not of the whole table), and a cache
+     * keyed on anything less than the bars themselves keeps drawing the
+     * previous coordinates after a bar has been dragged or the records have
+     * been reloaded.
      */
     get dependencyArrows() {
         const { start, end } = this.rowWindow;
         if (!this.props.archInfo.dependenciesField || !this.timelineWidth) {
             return [];
-        }
-        const collapsed = this.props.collapsed || {};
-        const key = [
-            start,
-            end,
-            this.timelineWidth,
-            this.paddingTop,
-            Object.keys(collapsed)
-                .filter((groupKey) => collapsed[groupKey])
-                .join(","),
-        ].join(":");
-        if (this._arrowsKey === key) {
-            return this._arrows;
         }
         const bars = new Map();
         let top = this.paddingTop;
@@ -381,8 +374,6 @@ export class GanttSoftRenderer extends Component {
                 });
             }
         }
-        this._arrowsKey = key;
-        this._arrows = arrows;
         return arrows;
     }
 
