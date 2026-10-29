@@ -17,13 +17,42 @@ import { SearchBar } from "@web/search/search_bar/search_bar";
 import { useSearchBarToggler } from "@web/search/search_bar/search_bar_toggler";
 import { standardViewProps } from "@web/views/standard_view_props";
 
-import { addFieldDays, fieldText, formatWindowLabel, parseOdooFieldDate, serializeOdooDate, shiftWindow, windowRange, SCALE_WINDOWS, WINDOW_RANGES } from "./gantt_utils";
+import {
+    DAY_MS,
+    addFieldDays,
+    buildCsv,
+    downloadTextFile,
+    fieldText,
+    fitWindow,
+    formatWindowLabel,
+    parseOdooFieldDate,
+    serializeOdooDate,
+    shiftWindow,
+    windowRange,
+    SCALE_WINDOWS,
+    WINDOW_RANGES,
+} from "./gantt_utils";
 import { GanttSoftPopover } from "./gantt_popover";
+
+const { DateTime } = luxon;
+
+/**
+ * Records the "fit" gesture reads before computing its range.
+ *
+ * Fitting means framing the whole search, so the two date fields of every
+ * record it returns are read once. The bound keeps that read cheap on a table
+ * of years of history; past it the fitted range describes the first records
+ * only, which the controller says out loud instead of drawing a truncated
+ * plan as if it were complete.
+ */
+const FIT_LIMIT = 2000;
 
 const SCALE_LABELS = {
     day: _t("Day"),
     week: _t("Week"),
     month: _t("Month"),
+    quarter: _t("Quarter"),
+    year: _t("Year"),
 };
 
 /**
@@ -59,7 +88,8 @@ export class GanttSoftController extends Component {
         const { activeFields, fields } = extractFieldsFromArchInfo(archInfo, this.props.fields);
 
         // Fields the view needs beyond the ones it declares: the two dates, the
-        // bar label, and the optional progress / colour fields.
+        // bar label, and the optional progress / colour / milestone /
+        // dependencies fields.
         const requiredFields = [
             "display_name",
             archInfo.dateStart,
@@ -68,6 +98,8 @@ export class GanttSoftController extends Component {
             archInfo.progressField,
             archInfo.colorField,
             archInfo.groupByField,
+            archInfo.milestoneField,
+            archInfo.dependenciesField,
         ].filter(Boolean);
         for (const name of requiredFields) {
             if (!activeFields[name]) {
@@ -90,13 +122,26 @@ export class GanttSoftController extends Component {
             : Date.now();
         // `range` is the length of the window: the view opens on the one its
         // arch asks for, and picking a scale zooms to that scale's own window.
-        const range = WINDOW_RANGES.includes(this.props.state?.range)
+        // A restored "fit" keeps the window it computed, since it is not a
+        // calendar unit that could be derived again.
+        const restoringFit = this.props.state?.range === "fit" && this.props.state?.fitWindow;
+        const range = restoringFit
+            ? "fit"
+            : WINDOW_RANGES.includes(this.props.state?.range)
             ? this.props.state.range
             : archInfo.range || "month";
         // `collapsedGroups` folds grouped rows away and survives re-renders:
         // its keys are the stable group keys computed by the renderer (an id
         // for a many2one, the raw value otherwise, empty string for "Not set").
-        this.state = useState({ scale, windowStart, range, collapsedGroups: {} });
+        this.state = useState({
+            scale,
+            windowStart,
+            range,
+            // The range a "fit" gesture computed: a custom window has no unit
+            // to be derived from, so it is kept as it was measured.
+            fitWindow: restoringFit ? this.props.state.fitWindow : null,
+            collapsedGroups: {},
+        });
 
         this.model = useModel(this.props.Model, {
             resModel: this.props.resModel,
@@ -116,6 +161,7 @@ export class GanttSoftController extends Component {
                 scale: this.state.scale,
                 windowStart: this.state.windowStart,
                 range: this.state.range,
+                fitWindow: this.state.fitWindow,
             }),
         });
     }
@@ -137,6 +183,12 @@ export class GanttSoftController extends Component {
 
     /** The window the view is on: a whole calendar unit around a reference date. */
     get window() {
+        // A fitted window is the span of the records, not a calendar unit: it
+        // has no reference date to be derived from, so it is read back as it
+        // was computed.
+        if (this.state.range === "fit" && this.state.fitWindow) {
+            return this.state.fitWindow;
+        }
         return windowRange(this.state.windowStart, this.state.range);
     }
 
@@ -181,6 +233,13 @@ export class GanttSoftController extends Component {
      * and the arrows are the paging.
      */
     _showWindow(reference) {
+        // A fitted window has no unit to step by, so the first arrow press
+        // leaves it for the month that holds the date: the alternative is an
+        // arrow whose step has to be invented from the records' span.
+        if (this.state.range === "fit") {
+            this.state.range = "month";
+            this.state.fitWindow = null;
+        }
         this.state.windowStart = reference;
         this.model.setWindow(this.window);
     }
@@ -203,7 +262,106 @@ export class GanttSoftController extends Component {
     setScale(scale) {
         this.state.scale = scale;
         this.state.range = SCALE_WINDOWS[scale] || this.state.range;
+        // Zooming leaves a fitted window: the scale names a unit the fit does
+        // not have.
+        this.state.fitWindow = null;
         this.model.setWindow(this.window);
+    }
+
+    /**
+     * Frame every record the current search returns.
+     *
+     * The view reads one window at a time, so framing the whole search means
+     * reading the two date fields of its records once: the window is then the
+     * span of their earliest start and latest stop, padded to whole days.
+     */
+    async zoomToFit() {
+        const archInfo = this.props.archInfo;
+        const records = await this.orm.searchRead(
+            this.props.resModel,
+            this.model.config.domain,
+            [archInfo.dateStart, archInfo.dateStop].filter(Boolean),
+            { limit: FIT_LIMIT, context: this.model.context }
+        );
+        const starts = [];
+        const stops = [];
+        for (const record of records) {
+            const start = parseOdooFieldDate(record[archInfo.dateStart], archInfo.dateStartType);
+            const stop = parseOdooFieldDate(record[archInfo.dateStop], archInfo.dateStopType);
+            if (start !== null) {
+                starts.push(start);
+            }
+            if (stop !== null) {
+                stops.push(stop);
+            }
+        }
+        const window = fitWindow(starts, stops);
+        if (!window) {
+            this.notification.add(_t("No record of this search carries a date to fit."), {
+                type: "warning",
+            });
+            return;
+        }
+        this.state.range = "fit";
+        this.state.fitWindow = window;
+        this.state.windowStart = window.start;
+        this.model.setWindow(window);
+        if (records.length >= FIT_LIMIT) {
+            this.notification.add(
+                _t("Fitted on the first %s records of this search; narrow it to see the rest.", FIT_LIMIT),
+                { type: "warning" }
+            );
+        }
+    }
+
+    /**
+     * Download the records of the current window as a CSV document.
+     *
+     * The screen is a window on the records, and so is the export: the two
+     * dates are written in the user's own format and timezone, and every field
+     * the arch declares follows them, in the order the arch lists them.
+     */
+    exportCsv() {
+        const { archInfo, fields, resModel } = this.props;
+        const extraNames = Object.values(archInfo.fieldNodes).map((info) => info.name);
+        const header = [
+            _t("Name"),
+            fields[archInfo.dateStart]?.string || archInfo.dateStart,
+            fields[archInfo.dateStop]?.string || archInfo.dateStop,
+            _t("Duration (days)"),
+        ];
+        for (const name of extraNames) {
+            header.push(fields[name]?.string || name);
+        }
+        const rows = this.model.records.map((record) => {
+            const start = parseOdooFieldDate(record[archInfo.dateStart], archInfo.dateStartType);
+            const stop = parseOdooFieldDate(record[archInfo.dateStop], archInfo.dateStopType);
+            const row = [
+                record.display_name || `#${record.id}`,
+                this._csvDate(start, archInfo.dateStartType),
+                this._csvDate(stop, archInfo.dateStopType),
+                start !== null && stop !== null ? Math.round(((stop - start) / DAY_MS) * 10) / 10 : "",
+            ];
+            for (const name of extraNames) {
+                row.push(this._fieldValue(name, record[name]));
+            }
+            return row;
+        });
+        const name = `${resModel}_${formatWindowLabel(
+            this.state.range,
+            this.window.start,
+            this.window.end
+        )}`.replace(/[^\w-]+/g, "_");
+        downloadTextFile(`${name}.csv`, buildCsv(header, rows));
+    }
+
+    /** One date of the CSV, read in the user's calendar like the screen does. */
+    _csvDate(timestamp, fieldType) {
+        if (timestamp === null) {
+            return "";
+        }
+        const date = DateTime.fromMillis(timestamp);
+        return fieldType === "date" ? formatDate(date) : formatDateTime(date);
     }
 
     onBarClick(row, element) {

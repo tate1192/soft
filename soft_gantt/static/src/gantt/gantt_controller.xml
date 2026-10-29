@@ -40,6 +40,18 @@
                             <t t-esc="scaleLabel(scale)"/>
                         </button>
                     </div>
+                    <!-- Frame the whole search: the fitted window is what the
+                         records span, and the first arrow press leaves it for a
+                         calendar unit again. -->
+                    <button type="button" class="btn btn-secondary o_gantt_soft_button_fit"
+                            title="Frame every record of the search" t-on-click="zoomToFit">
+                        <i class="fa fa-arrows-h me-1"/>Fit
+                    </button>
+                    <!-- Download the records of the current window. -->
+                    <button type="button" class="btn btn-secondary o_gantt_soft_button_csv"
+                            title="Download the records of this period as CSV" t-on-click="exportCsv">
+                        <i class="fa fa-download me-1"/>CSV
+                    </button>
                 </t>
                 <t t-set-slot="layout-actions">
                     <SearchBar toggler="searchBarToggler"/>

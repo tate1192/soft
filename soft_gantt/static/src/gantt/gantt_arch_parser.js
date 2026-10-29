@@ -6,7 +6,7 @@ import { WINDOW_RANGES } from "./gantt_utils";
 import { Field } from "@web/views/fields/field";
 import { getActiveActions } from "@web/views/utils";
 
-const SCALES = ["day", "week", "month"];
+const SCALES = ["day", "week", "month", "quarter", "year"];
 
 /** Arch attribute -> the field types it accepts (kept in sync with the server). */
 const FIELD_ATTRIBUTES = {
@@ -15,6 +15,12 @@ const FIELD_ATTRIBUTES = {
     label: ["char", "text", "selection", "integer", "float", "many2one"],
     progress: ["float", "integer"],
     color: ["integer"],
+    // A record flagged by this boolean field is drawn as a milestone: a diamond
+    // on its date instead of a bar.
+    milestone: ["boolean"],
+    // The list of records that must finish first: the renderer draws an arrow
+    // from each of them to this record.
+    dependencies: ["many2many", "one2many"],
     // The row a record is drawn on. A date is the timeline itself and a float
     // would give one row per value, so neither is accepted.
     group_by: ["char", "text", "selection", "integer", "many2one", "boolean"],
@@ -62,6 +68,8 @@ export class GanttSoftArchParser {
             dateStopType: "datetime",
             labelField: "",
             groupByField: "",
+            milestoneField: "",
+            dependenciesField: "",
             selectionLabels: {},
             progressField: "",
             colorField: "",
@@ -106,6 +114,32 @@ export class GanttSoftArchParser {
             this._validateField(fields, modelName, labelField, FIELD_ATTRIBUTES.label, "label");
             archInfo.labelField = labelField;
             this._rememberSelection(archInfo, fields, labelField);
+        }
+
+        const milestoneField = xmlDoc.getAttribute("milestone");
+        if (milestoneField) {
+            this._validateField(fields, modelName, milestoneField, FIELD_ATTRIBUTES.milestone, "milestone");
+            archInfo.milestoneField = milestoneField;
+        }
+
+        const dependenciesField = xmlDoc.getAttribute("dependencies");
+        if (dependenciesField) {
+            this._validateField(
+                fields,
+                modelName,
+                dependenciesField,
+                FIELD_ATTRIBUTES.dependencies,
+                "dependencies"
+            );
+            // An arrow joins two bars of this view, so the list must point back
+            // at the view's own model: a list of another model has nothing to
+            // join it to.
+            if (fields[dependenciesField].relation !== modelName) {
+                throw new Error(
+                    `Field "${dependenciesField}" used as dependencies must point at ${modelName}, not at ${fields[dependenciesField].relation}.`
+                );
+            }
+            archInfo.dependenciesField = dependenciesField;
         }
 
         const scalesAttribute = xmlDoc.getAttribute("scales");

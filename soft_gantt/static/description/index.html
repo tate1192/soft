@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <title>Soft Gantt</title>
+</head>
+<body>
+<section class="container">
+    <div class="row">
+        <div class="col-lg-8">
+            <h1>Soft Gantt</h1>
+            <p class="lead">
+                A native Gantt / timeline view type for Odoo 19 Community. No
+                Enterprise module, no vendored JavaScript library: the bars, the
+                drag and drop, the milestones and the dependency arrows are drawn
+                by the view itself.
+            </p>
+            <p>
+                Odoo 19 Community ships no <code>gantt</code> view: that type only
+                exists in the Enterprise add-on <code>web_gantt</code>. This module
+                adds a view type of its own, <code>gantt_soft</code>, registered the
+                same way the core registers its extra view types.
+            </p>
+
+            <h2>Features</h2>
+            <ul>
+                <li>Rows from the records, dates named by the view itself: the same
+                    type schedules any model with two date fields</li>
+                <li>A window, not a table: one calendar unit is read at a time, so a
+                    table of years of history stays fast</li>
+                <li>Day / week / month / quarter / year scales, with a two level header
+                    and today marked</li>
+                <li>Drag a bar to reschedule it, drag an edge to change one date</li>
+                <li>Milestones drawn as a diamond on their date</li>
+                <li>Dependency arrows between the records a relational field names</li>
+                <li>One row per record, or one row per group (<code>group_by</code>),
+                    with lanes for overlapping records and foldable groups</li>
+                <li>Progress bar, colour index and a details card per record</li>
+                <li>Fit the whole search in one click, and export the period as CSV</li>
+                <li>Search filters and favourites really reload the view</li>
+                <li>Light and dark colour scheme, driven by SCSS variables</li>
+                <li>English and Turkish user interface</li>
+            </ul>
+
+            <h2>Usage</h2>
+            <p>A Gantt view is declared like any other view:</p>
+            <pre><code>&lt;record id="my_model_gantt_view" model="ir.ui.view"&gt;
+    &lt;field name="model"&gt;my.model&lt;/field&gt;
+    &lt;field name="arch" type="xml"&gt;
+        &lt;gantt_soft date_start="date_start"
+                    date_stop="date_end"
+                    label="name"
+                    progress="progress"
+                    milestone="is_milestone"
+                    dependencies="depends_on"
+                    group_by="team_id"
+                    scales="day,week,month,quarter,year"
+                    mode="week"/&gt;
+    &lt;/field&gt;
+&lt;/record&gt;</code></pre>
+            <p>
+                The mode is then offered to the view switcher by adding
+                <code>gantt_soft</code> to the action's <code>view_mode</code>, from a
+                consumer module that names the model.
+            </p>
+
+            <h2>Validation</h2>
+            <p>
+                Every attribute that can be checked without a browser is checked when
+                the view is installed: an unknown field, a Char field used as a date, an
+                unknown attribute, a bad scale, a non-positive limit or a dependency
+                list pointing at another model refuses the view with a message that
+                names the problem, instead of showing an empty schedule.
+            </p>
+
+            <h2>License and credits</h2>
+            <p>
+                Copyright Softteknik Bili&#351;im. Licensed under AGPL-3.0 or later.
+                No third-party JavaScript library is bundled: the view is built on
+                Odoo's own OWL and luxon.
+            </p>
+        </div>
+        <div class="col-lg-4 text-center">
+            <img src="icon.png" alt="Soft Gantt" class="img img-fluid" style="max-width: 180px;"/>
+        </div>
+    </div>
+</section>
+</body>
+</html>

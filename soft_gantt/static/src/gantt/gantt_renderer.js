@@ -1,4 +1,4 @@
-import { Component, onWillRender, useRef } from "@odoo/owl";
+import { Component, onMounted, onWillRender, useRef } from "@odoo/owl";
 import { formatDate } from "@web/core/l10n/dates";
 import { _t } from "@web/core/l10n/translation";
 import { useVirtualGrid } from "@web/core/virtual_grid_hook";
@@ -13,6 +13,7 @@ import {
     fieldText,
     packLanes,
     parseOdooFieldDate,
+    relationIds,
     snapToUnit,
     startOfLocalDay,
     startOfLocalMonth,
@@ -89,6 +90,11 @@ export class GanttSoftRenderer extends Component {
         this.suppressClick = false;
 
         this.viewportRef = useRef("viewport");
+        // The dependency arrows are drawn in pixels over the timeline, so the
+        // renderer needs the timeline's own width: a percentage cannot be used
+        // as an SVG coordinate without distorting the stroke.
+        this.timelineRef = useRef("timeline");
+        this.timelineWidth = 0;
         this.computedRows = null;
         this.syncedRowCount = -1;
         this.syncedHeights = null;
@@ -102,6 +108,7 @@ export class GanttSoftRenderer extends Component {
             // told their heights so it can tell which ones are visible. A row
             // holding a group has a height of its own, hence the signature of
             // the heights and not just their count.
+            this.timelineWidth = this.timelineRef.el?.clientWidth || 0;
             this.computedRows = this._buildRows();
             const heights = this.computedRows.map((row) => row.height);
             const signature = heights.join(",");
@@ -109,6 +116,16 @@ export class GanttSoftRenderer extends Component {
                 this.syncedHeights = signature;
                 this.syncedRowCount = heights.length;
                 this.virtualGrid.setRowsHeights(heights);
+            }
+        });
+
+        // The first render happens before the timeline exists, so its width is
+        // still unknown and no arrow is drawn. One render after mount is what
+        // measures it; without it the arrows would appear only on the next
+        // interaction.
+        onMounted(() => {
+            if (!this.timelineWidth && this.timelineRef.el?.clientWidth) {
+                this.render();
             }
         });
     }
@@ -137,7 +154,8 @@ export class GanttSoftRenderer extends Component {
     }
 
     _buildScheduledRows() {
-        const { dateStart, dateStop, dateStartType, dateStopType } = this.props.archInfo;
+        const { dateStart, dateStop, dateStartType, dateStopType, milestoneField, dependenciesField } =
+            this.props.archInfo;
         const rows = [];
         for (const record of this.props.records) {
             // A `date` is a calendar day in the user's timezone, a `datetime`
@@ -162,6 +180,10 @@ export class GanttSoftRenderer extends Component {
                 label: this._label(record),
                 start,
                 stop,
+                // A record the view flagged as a milestone is a point in time,
+                // not a duration: it is drawn on its start date.
+                milestone: Boolean(milestoneField && record[milestoneField]),
+                dependsOn: dependenciesField ? relationIds(record[dependenciesField]) : [],
             });
         }
         return rows;
@@ -292,6 +314,67 @@ export class GanttSoftRenderer extends Component {
 
     get columns() {
         return this.timeline.columns;
+    }
+
+    /**
+     * Arrows joining the records a `dependencies` list declares.
+     *
+     * Every arrow joins two bars the viewport paints: a bar that is not drawn
+     * (folded group, row scrolled away) has no end an arrow could reach, so the
+     * pair is skipped rather than drawn to nowhere. The geometry is in pixels
+     * because an SVG stroke cannot be described in percentages without being
+     * distorted by the non-uniform scale the coordinates would need.
+     *
+     * The result is deliberately NOT memoised: it is a loop over the painted
+     * bars (a function of the viewport, not of the whole table), and a cache
+     * keyed on anything less than the bars themselves keeps drawing the
+     * previous coordinates after a bar has been dragged or the records have
+     * been reloaded.
+     */
+    get dependencyArrows() {
+        const { start, end } = this.rowWindow;
+        if (!this.props.archInfo.dependenciesField || !this.timelineWidth) {
+            return [];
+        }
+        const bars = new Map();
+        let top = this.paddingTop;
+        for (let index = start; index <= end; index++) {
+            const row = this.rows[index];
+            if (!row) {
+                break;
+            }
+            for (const bar of row.bars) {
+                if (!bar.geometry || bar.collapsedGroup) {
+                    continue;
+                }
+                bars.set(bar.id, {
+                    x: (bar.geometry.left / 100) * this.timelineWidth,
+                    width: (bar.geometry.width / 100) * this.timelineWidth,
+                    y: top + bar.top + BAR_HEIGHT / 2,
+                    dependsOn: bar.dependsOn || [],
+                });
+            }
+            top += row.height;
+        }
+        const arrows = [];
+        for (const [id, bar] of bars) {
+            for (const blockerId of bar.dependsOn) {
+                const blocker = bars.get(blockerId);
+                if (!blocker) {
+                    continue;
+                }
+                const x1 = blocker.x + blocker.width;
+                const x2 = bar.x;
+                const reach = Math.max(24, Math.abs(x2 - x1) / 2);
+                arrows.push({
+                    key: `${blockerId}:${id}`,
+                    d: `M ${x1} ${blocker.y} C ${x1 + reach} ${blocker.y}, ${
+                        x2 - reach
+                    } ${bar.y}, ${x2} ${bar.y}`,
+                });
+            }
+        }
+        return arrows;
     }
 
     get bands() {
@@ -477,9 +560,14 @@ export class GanttSoftRenderer extends Component {
         // are kept as they are, which is what keeps the one-hour default.
         const duration = ensureDuration(row.start, row.stop, this.timeline.unit);
         const { start, stop } = snapToUnit(duration.start, duration.stop, this.timeline.unit);
-        const geometry = barGeometry(start, stop, range.start, range.end);
+        // A milestone is a point in time: it is placed on its date and holds no
+        // width, so the bar's own box cannot describe a duration it does not
+        // have. The diamond itself is drawn by the stylesheet.
+        const geometry = row.milestone
+            ? { left: this._pointPercent(duration.start, range), width: 0 }
+            : barGeometry(start, stop, range.start, range.end);
         let progress = null;
-        if (progressField && typeof row.record[progressField] === "number") {
+        if (!row.milestone && progressField && typeof row.record[progressField] === "number") {
             progress = Math.max(0, Math.min(100, row.record[progressField]));
         }
         let colorClass = "";
@@ -489,7 +577,11 @@ export class GanttSoftRenderer extends Component {
         }
         // Built here and not in the template: `t-att-class` takes an object
         // or a string, and this version of Owl has no array form.
-        const barClass = [colorClass, this.props.canEdit && "o_gantt_soft_bar_draggable"]
+        const barClass = [
+            colorClass,
+            this.props.canEdit && "o_gantt_soft_bar_draggable",
+            row.milestone && "o_gantt_soft_bar_milestone",
+        ]
             .filter(Boolean)
             .join(" ");
         return {
@@ -498,9 +590,18 @@ export class GanttSoftRenderer extends Component {
             progress,
             colorClass,
             barClass,
-            title: this._barTitle(row),
+            title: row.milestone ? this._milestoneTitle(row) : this._barTitle(row),
             extra: this._extraFields(row),
         };
+    }
+
+    /** Where a single instant sits in a range, as a percentage. */
+    _pointPercent(timestamp, range) {
+        const span = range.end - range.start;
+        if (!span) {
+            return 0;
+        }
+        return Math.max(0, Math.min(100, ((timestamp - range.start) / span) * 100));
     }
 
     // ------------------------------------------------------------------
@@ -874,6 +975,21 @@ export class GanttSoftRenderer extends Component {
         const lines = [
             withRecordName ? row.record.display_name || row.label : row.label,
             this._formatRange(titleStart, titleStop),
+        ];
+        const extra = this._extraFields(row);
+        if (extra) {
+            lines.push(extra);
+        }
+        return lines.join("\n");
+    }
+
+    /** Title of a milestone: the instant it stands for, not a range. */
+    _milestoneTitle(row) {
+        const lines = [
+            row.record.display_name || row.label,
+            `${_t("Milestone")}: ${formatDate(DateTime.fromMillis(row.start), {
+                format: "dd MMM yyyy",
+            })}`,
         ];
         const extra = this._extraFields(row);
         if (extra) {

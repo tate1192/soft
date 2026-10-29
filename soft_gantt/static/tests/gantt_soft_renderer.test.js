@@ -1,7 +1,7 @@
 import { after, beforeEach, describe, expect, getFixture, test } from "@odoo/hoot";
 import { queryAll, queryFirst, queryOne } from "@odoo/hoot-dom";
 import { animationFrame } from "@odoo/hoot-mock";
-import { App } from "@odoo/owl";
+import { App, Component, xml, useState } from "@odoo/owl";
 import { getTemplate, registerTemplate } from "@web/core/templates";
 import { allowTranslations } from "@web/../tests/web_test_helpers";
 
@@ -57,6 +57,8 @@ function makeArchInfo(overrides = {}) {
         dateStopType: "datetime",
         progressField: "",
         colorField: "",
+        milestoneField: "",
+        dependenciesField: "",
         fieldNodes: {},
         ...overrides,
     };
@@ -795,4 +797,144 @@ describe("GanttSoftRenderer", () => {
         expect(gridlinesHeight).toBeLessThan(queryOne(".o_gantt_soft_timeline").offsetHeight);
     });
 });
+
+/**
+ * Milestones and dependencies: the two features the view gained from the
+ * comparison with the third-party Gantt engine. Both are opt-in per view, so a
+ * view that declares neither must behave exactly as before.
+ */
+describe("milestones", () => {
+    test("a record flagged as a milestone is drawn as a point, with no grips", async () => {
+        await mountRenderer({
+            records: [
+                makeRecord(1, "2026-03-02 08:00:00", "2026-03-05 08:00:00", {
+                    is_milestone: true,
+                }),
+            ],
+            archInfo: makeArchInfo({ milestoneField: "is_milestone" }),
+        });
+        const bar = queryOne(".o_gantt_soft_bar");
+        expect(bar.classList.contains("o_gantt_soft_bar_milestone")).toBe(true);
+        // A milestone holds no duration: the diamond is drawn by the stylesheet
+        // on a box of its own width.
+        expect(percentage(bar, "width")).toBe(0);
+        expect(queryAll(".o_gantt_soft_bar_handle")).toHaveLength(0);
+        expect(queryAll(".o_gantt_soft_bar_label")).toHaveLength(0);
+        expect(bar.title).toInclude("Milestone");
+    });
+
+    test("a record that is not flagged stays a bar", async () => {
+        await mountRenderer({
+            records: [
+                makeRecord(1, "2026-03-02 08:00:00", "2026-03-05 08:00:00", {
+                    is_milestone: false,
+                }),
+            ],
+            archInfo: makeArchInfo({ milestoneField: "is_milestone" }),
+        });
+        const bar = queryOne(".o_gantt_soft_bar");
+        expect(bar.classList.contains("o_gantt_soft_bar_milestone")).toBe(false);
+        expect(percentage(bar, "width")).toBeGreaterThan(0);
+        expect(".o_gantt_soft_bar_handle").toHaveCount(2);
+    });
+});
+
+describe("dependencies", () => {
+    test("one arrow joins the two bars of a declared dependency", async () => {
+        await mountRenderer({
+            records: [
+                makeRecord(1, "2026-03-02 08:00:00", "2026-03-03 08:00:00"),
+                makeRecord(2, "2026-03-04 08:00:00", "2026-03-05 08:00:00", {
+                    depends_on: [{ id: 1, display_name: "Task 1" }],
+                }),
+            ],
+            archInfo: makeArchInfo({ dependenciesField: "depends_on" }),
+        });
+        // The arrows are drawn in pixels over the timeline, so the renderer
+        // measures it once after mount and repaints.
+        await animationFrame();
+        const paths = queryAll(".o_gantt_soft_dependency");
+        expect(paths).toHaveLength(1);
+        expect(paths[0].getAttribute("d")).toMatch(/^M [\d.]+ [\d.]+ C /);
+        expect(paths[0].getAttribute("marker-end")).toBe("url(#o_gantt_soft_arrow_head)");
+    });
+
+    test("an arrow is not drawn to a bar the viewport does not paint", async () => {
+        await mountRenderer({
+            records: [
+                makeRecord(1, "2026-03-02 08:00:00", "2026-03-03 08:00:00"),
+                makeRecord(2, "2026-03-04 08:00:00", "2026-03-05 08:00:00", {
+                    // Record 99 is not in the view: there is no bar to reach.
+                    depends_on: [99],
+                }),
+            ],
+            archInfo: makeArchInfo({ dependenciesField: "depends_on" }),
+        });
+        await animationFrame();
+        expect(".o_gantt_soft_dependency").toHaveCount(0);
+        expect(".o_gantt_soft_dependencies").toHaveCount(0);
+    });
+
+    test("the arrows follow the bars when a record moves", async () => {
+        // The arrows are computed from the bars the viewport paints, so they
+        // have to be recomputed whenever those bars move: a cached layer keyed
+        // on the row window alone keeps the previous coordinates on screen.
+        const records = [
+            makeRecord(1, "2026-03-02 08:00:00", "2026-03-03 08:00:00"),
+            makeRecord(2, "2026-03-04 08:00:00", "2026-03-05 08:00:00", {
+                depends_on: [{ id: 1 }],
+            }),
+        ];
+        let host = null;
+        class Host extends Component {
+            static template = xml`
+                <GanttSoftRenderer archInfo="props.archInfo" records="state.records"
+                                    scale="'day'" canEdit="true"
+                                    onBarClick="() => {}" onReschedule="() => {}"/>`;
+            static components = { GanttSoftRenderer };
+            static props = { archInfo: Object };
+            setup() {
+                this.state = useState({ records });
+                host = this;
+            }
+        }
+        const target = document.createElement("div");
+        getFixture().append(target);
+        allowTranslations();
+        await ensureRendererTemplate();
+        const app = new App(Host, {
+            props: { archInfo: makeArchInfo({ dependenciesField: "depends_on" }) },
+            getTemplate,
+            test: true,
+        });
+        app.mount(target);
+        after(() => {
+            app.destroy();
+            target.remove();
+        });
+        await animationFrame();
+        await animationFrame();
+        const beforeMove = queryOne(".o_gantt_soft_dependency").getAttribute("d");
+
+        // The dependent record moves two days later: the arrow must follow.
+        host.state.records = [
+            records[0],
+            makeRecord(2, "2026-03-06 08:00:00", "2026-03-07 08:00:00", {
+                depends_on: [{ id: 1 }],
+            }),
+        ];
+        await animationFrame();
+        const afterMove = queryOne(".o_gantt_soft_dependency").getAttribute("d");
+        expect(afterMove).not.toBe(beforeMove);
+    });
+
+    test("a view without a dependencies field has no arrow layer", async () => {
+        await mountRenderer({
+            records: [makeRecord(1, "2026-03-02 08:00:00", "2026-03-03 08:00:00")],
+        });
+        await animationFrame();
+        expect(".o_gantt_soft_dependencies").toHaveCount(0);
+    });
+});
+
 

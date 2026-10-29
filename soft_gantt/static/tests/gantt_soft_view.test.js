@@ -1,5 +1,6 @@
 import { after, describe, expect, getFixture, test } from "@odoo/hoot";
 import { click, queryAll, queryOne } from "@odoo/hoot-dom";
+import { animationFrame } from "@odoo/hoot-mock";
 import {
     defineModels,
     fields,
@@ -155,6 +156,57 @@ test("create is not offered when the arch forbids it", async () => {
     });
     expect(".o_gantt_soft_button_add").toHaveCount(0);
     expect(created).toEqual([]);
+});
+
+test("the fit button frames the whole search", async () => {
+    await mountGanttView({
+        type: "gantt_soft",
+        resModel: "project.task",
+        state: { ...MARCH_STATE },
+    });
+    expect(".o_gantt_soft_button_fit").toHaveCount(1);
+    // The records of the mocked model span 2026-03-02 to 2026-03-20, so the
+    // fitted window is named by those two ends rather than by a month.
+    await click(queryOne(".o_gantt_soft_button_fit"));
+    // Fitting reads the two date fields of the search first, so the label
+    // becomes the two ends of the records' span (2026-02-01 to 2026-03-10 in
+    // the mocked data) instead of a month name, one RPC later.
+    // Fitting reads the two date fields of the search first, so the label
+    // becomes the two ends of the records' span (2026-02-01 to 2026-03-10 in
+    // the mocked data) instead of a month name, one RPC later.
+    await animationFrame();
+    await animationFrame();
+    expect(queryOne(".o_gantt_soft_window_label").textContent.trim()).toBe(
+        "01 Feb 2026 - 10 Mar 2026"
+    );
+});
+
+test("the CSV button downloads the records of the window", async () => {
+    const blobs = [];
+    const original = URL.createObjectURL;
+    URL.createObjectURL = (blob) => {
+        blobs.push(blob);
+        return "blob:soft-gantt-test";
+    };
+    after(() => {
+        URL.createObjectURL = original;
+    });
+    await mountGanttView({
+        type: "gantt_soft",
+        resModel: "project.task",
+        state: { ...MARCH_STATE },
+    });
+    await click(queryOne(".o_gantt_soft_button_csv"));
+    expect(blobs).toHaveLength(1);
+    const csv = await blobs[0].text();
+    const lines = csv.replace("\ufeff", "").split("\r\n");
+    // The header names the two dates of the view and the computed duration.
+    expect(lines[0].split(";")[0]).toBe("Name");
+    expect(lines[0]).toInclude("Duration (days)");
+    // The window holds three dated records; the fourth is out of it.
+    expect(lines).toHaveLength(4);
+    // One row per painted record, each with its own label in the first column.
+    expect(lines.slice(1).every((line) => line.split(";")[0].length > 0)).toBe(true);
 });
 
 test("a day window is labelled as a day", async () => {
