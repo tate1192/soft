@@ -7,3 +7,4 @@ from . import test_backup_file_filter
 from . import test_restore_guard
 from . import test_sftp_paramiko
 from . import test_provider_preflight
+from . import test_rpc_security
