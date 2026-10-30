@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_backup_restore_wizard_form" model="ir.ui.view">
+        <field name="name">backup.restore.wizard.form</field>
+        <field name="model">backup.restore.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Restore Backup">
+                <group invisible="state == 'restoring'">
+                    <group string="1. Select Storage Provider">
+                        <field name="provider_type"/>
+                        <field name="local_provider_id"
+                               invisible="provider_type != 'local'"
+                               options="{'no_create': True}"/>
+                        <field name="sftp_provider_id"
+                               invisible="provider_type != 'sftp'"
+                               options="{'no_create': True}"/>
+                        <field name="cloud_provider_id"
+                               invisible="provider_type != 'cloud'"
+                               options="{'no_create': True}"/>
+                        <button name="action_list_backups"
+                                type="object"
+                                string="List Available Backups"
+                                class="btn-primary"/>
+                    </group>
+                    <group string="2. Choose Backup File">
+                        <field name="available_backups" readonly="1" nolabel="1"/>
+                        <field name="selected_backup" placeholder="Copy the filename from the list above"/>
+                    </group>
+                    <group string="3. Restore Options">
+                        <field name="target_database"/>
+                        <field name="create_database"/>
+                        <field name="drop_existing"/>
+                        <field name="neutralize_database"/>
+                    </group>
+                    <group string="4. Encryption (if applicable)">
+                        <field name="backup_is_encrypted"/>
+                        <field name="encryption_key"
+                               invisible="not backup_is_encrypted"
+                               password="True"/>
+                    </group>
+                    <footer>
+                        <button name="action_restore"
+                                type="object"
+                                string="Restore Backup"
+                                class="btn-danger"
+                                confirm="This will restore the backup into the target database. Existing data may be overwritten. Are you sure?"/>
+                        <button special="cancel" string="Cancel"/>
+                    </footer>
+                </group>
+                <group string="Restore Progress" invisible="state != 'restoring'">
+                    <field name="restore_log" nolabel="1"/>
+                </group>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_backup_restore_wizard" model="ir.actions.act_window">
+        <field name="name">Restore Backup</field>
+        <field name="res_model">backup.restore.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="help" type="html">
+            <p>Restore a backup from any configured storage provider.</p>
+            <p>Select a provider, list available backups, choose a file, and restore it to a database.</p>
+        </field>
+    </record>
+</odoo>
