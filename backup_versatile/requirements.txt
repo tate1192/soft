@@ -1,0 +1,7 @@
+# Backup Versatile - External Dependencies
+# =========================================
+#
+# Required:
+paramiko>=3.4,<6.0
+#
+# pip install "paramiko>=3.4,<6.0"
