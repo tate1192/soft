@@ -314,6 +314,7 @@ class BackupProviderCloud(models.Model):
 
     # ── Implement abstract interface ────────────────────────────────────
 
+    @api.private
     def test_connection(self):
         """Test cloud storage connection by listing the bucket."""
         self.ensure_one()
@@ -365,6 +366,7 @@ class BackupProviderCloud(models.Model):
                 'message': 'S3 connection failed (boto3): %s' % e,
             }
 
+    @api.private
     def upload_backup(self, backup_file_path, remote_filename):
         """Upload backup file to cloud storage."""
         self.ensure_one()
@@ -439,6 +441,7 @@ class BackupProviderCloud(models.Model):
                 'metadata': {},
             }
 
+    @api.private
     def download_backup(self, remote_filename, local_path):
         """Download backup file from cloud storage."""
         self.ensure_one()
@@ -486,6 +489,7 @@ class BackupProviderCloud(models.Model):
                 'message': 'S3 download failed: %s' % e,
             }
 
+    @api.private
     def list_backups(self, prefix=None):
         """List backup files in cloud storage."""
         self.ensure_one()
@@ -569,6 +573,7 @@ class BackupProviderCloud(models.Model):
             _logger.exception('boto3 list failed')
             return []
 
+    @api.private
     def delete_backup(self, remote_filename):
         """Delete backup file from cloud storage."""
         self.ensure_one()
@@ -601,6 +606,7 @@ class BackupProviderCloud(models.Model):
         except Exception as e:
             return {'success': False, 'message': 'Delete failed: %s' % e}
 
+    @api.private
     def get_storage_info(self):
         """Get cloud storage usage information."""
         self.ensure_one()

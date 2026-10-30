@@ -1017,8 +1017,16 @@ class BackupJob(models.Model):
             )
         return len(stuck)
 
+    def _assert_backup_admin(self):
+        """Reject backup execution for read-only users."""
+        if not self.env.user.has_group('backup_versatile.group_backup_admin'):
+            raise AccessDenied(self.env._(
+                'Backup administrator rights are required for this operation.'
+            ))
+
     def retry_backup(self):
         """Retry a failed backup job."""
+        self._assert_backup_admin()
         self.ensure_one()
         
         if self.status not in ['error', 'warning']:
