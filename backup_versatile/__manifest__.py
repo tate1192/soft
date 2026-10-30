@@ -43,7 +43,7 @@
     'author': "Softteknik Bilişim",
     'website': "https://softteknik.com",
     'category': 'Administration',
-    'version': '19.0.1.0.4',
+    'version': '19.0.1.0.5',
 
     # Module dependencies
     'depends': ['base'],
@@ -76,7 +76,7 @@
     'auto_install': False,
     'application': True,
 
-    'license': 'Other proprietary',
+    'license': 'LGPL-3',
 
     # Images
     'images': [
