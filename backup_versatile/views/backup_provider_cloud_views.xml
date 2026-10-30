@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- List View -->
+    <record id="view_backup_provider_cloud_list" model="ir.ui.view">
+        <field name="name">backup.provider.cloud.list</field>
+        <field name="model">backup.provider.cloud</field>
+        <field name="arch" type="xml">
+            <list string="Cloud Storage Providers" decoration-muted="not active">
+                <field name="name"/>
+                <field name="cloud_service" decoration-info="1"/>
+                <field name="bucket"/>
+                <field name="endpoint"/>
+                <field name="region"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_backup_provider_cloud_form" model="ir.ui.view">
+        <field name="name">backup.provider.cloud.form</field>
+        <field name="model">backup.provider.cloud</field>
+        <field name="arch" type="xml">
+            <form string="Cloud Storage Provider">
+                <header>
+                    <button name="test_connection_action" type="object"
+                            string="Test Connection" class="btn-primary"/>
+                    <button name="action_reset_custom_remote" type="object"
+                            string="Reset Remote" class="btn-secondary"
+                            confirm="Reset to connection fields mode?"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" class="oe_edit_only"/>
+                        <h1><field name="name" placeholder="Provider Name"/></h1>
+                    </div>
+                    <group>
+                        <field name="active"/>
+                    </group>
+
+                    <notebook>
+                        <page string="Connection">
+                            <group>
+                                <group string="Cloud Service">
+                                    <field name="cloud_service"/>
+                                    <field name="bucket"/>
+                                    <field name="region"/>
+                                    <field name="endpoint" placeholder="https://s3.eu-central-1.amazonaws.com"/>
+                                </group>
+                                <group string="Authentication">
+                                    <field name="access_key_id"/>
+                                    <field name="secret_access_key" password="True"/>
+                                    <field name="acl"/>
+                                    <field name="storage_class"/>
+                                </group>
+                            </group>
+                        </page>
+
+                        <page string="Advanced">
+                            <group>
+                                <group string="Pre-configured rclone Remote">
+                                    <field name="use_custom_remote"/>
+                                    <field name="custom_remote_name"
+                                           invisible="not use_custom_remote"/>
+                                    <field name="custom_remote_path"
+                                           invisible="not use_custom_remote"/>
+                                </group>
+                                <group string="Extra Flags">
+                                    <field name="rclone_flags"
+                                           placeholder="--checksum --verbose"/>
+                                </group>
+                            </group>
+                            <div class="alert alert-info mt-2" role="alert">
+                                <i class="fa fa-info-circle me-1" role="img" aria-label="Info"/>
+                                If rclone is not installed, S3-compatible services fall back to boto3.
+                                Install rclone: <a href="https://rclone.org/install/" target="_blank">rclone.org/install</a>
+                            </div>
+                        </page>
+
+                        <page string="Test Results">
+                            <group>
+                                <field name="test_connection_result" readonly="1"/>
+                                <field name="test_connection_date" readonly="1"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_backup_provider_cloud" model="ir.actions.act_window">
+        <field name="name">Cloud Storage Providers</field>
+        <field name="res_model">backup.provider.cloud</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>
