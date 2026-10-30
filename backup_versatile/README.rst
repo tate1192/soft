@@ -112,5 +112,5 @@ network or a remote server: the SFTP session and rclone are stubbed.
 License
 =======
 
-``Other proprietary`` — see the manifest. The rest of this repository is
-AGPL-3; this module is the exception and keeps its own licence.
+``LGPL-3``, like the rest of this repository — see the ``license`` key in the
+manifest and ``README.md`` at the repository root.
