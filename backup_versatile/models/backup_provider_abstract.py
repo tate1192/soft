@@ -4,6 +4,7 @@ import logging
 
 from abc import abstractmethod
 from odoo import models, fields, api
+from odoo.exceptions import AccessDenied
 
 _logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class BackupProviderAbstract(models.AbstractModel):
                 record.display_name = ("Provider #%s" % record.id) if record.id else "New Provider"
 
     # Abstract methods that must be implemented by concrete providers
+    @api.private
     @abstractmethod
     def test_connection(self):
         """
@@ -68,13 +70,21 @@ class BackupProviderAbstract(models.AbstractModel):
             dict: Result containing success status and message
         """
         pass
-    
+
+    def _assert_backup_admin(self):
+        """Reject side-effecting provider actions for read-only users."""
+        if not self.env.user.has_group('backup_versatile.group_backup_admin'):
+            raise AccessDenied(self.env._(
+                'Backup administrator rights are required for this operation.'
+            ))
+
     def test_connection_action(self):
         """
         Test connection method for UI button - shows notification and updates fields.
         
         This method calls test_connection() and displays appropriate notifications.
         """
+        self._assert_backup_admin()
         try:
             result = self.test_connection()
             
@@ -122,6 +132,7 @@ class BackupProviderAbstract(models.AbstractModel):
                 }
             }
     
+    @api.private
     @abstractmethod
     def upload_backup(self, backup_file_path, remote_filename):
         """
@@ -136,6 +147,7 @@ class BackupProviderAbstract(models.AbstractModel):
         """
         pass
     
+    @api.private
     @abstractmethod
     def download_backup(self, remote_filename, local_path):
         """
@@ -150,6 +162,7 @@ class BackupProviderAbstract(models.AbstractModel):
         """
         pass
     
+    @api.private
     @abstractmethod
     def list_backups(self, prefix=None):
         """
@@ -163,6 +176,7 @@ class BackupProviderAbstract(models.AbstractModel):
         """
         pass
     
+    @api.private
     @abstractmethod
     def delete_backup(self, remote_filename):
         """
@@ -176,6 +190,7 @@ class BackupProviderAbstract(models.AbstractModel):
         """
         pass
     
+    @api.private
     @abstractmethod
     def get_storage_info(self):
         """

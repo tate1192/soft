@@ -5,7 +5,7 @@ import logging
 import re
 
 from odoo import models, fields, api
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import AccessDenied, UserError, ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -190,13 +190,21 @@ class BackupConfig(models.Model):
                 record.backup_success_rate = (len(successful_jobs) / len(jobs)) * 100
             else:
                 record.backup_success_rate = 0.0
-    
+
+    def _assert_backup_admin(self):
+        """Reject side-effecting backup actions for read-only users."""
+        if not self.env.user.has_group('backup_versatile.group_backup_admin'):
+            raise AccessDenied(self.env._(
+                'Backup administrator rights are required for this operation.'
+            ))
+
     def create_backup(self):
         """
         Create a backup using this configuration.
         
         This method creates a new backup job and processes it.
         """
+        self._assert_backup_admin()
         self.ensure_one()
         
         if not self.active:
@@ -311,6 +319,7 @@ class BackupConfig(models.Model):
     
     def test_providers(self):
         """Test all configured providers."""
+        self._assert_backup_admin()
         self.ensure_one()
 
         if not self.all_providers:
@@ -376,6 +385,7 @@ class BackupConfig(models.Model):
 
     def action_generate_encryption_key(self):
         """Generate a random AES-256 key and store it base64-encoded."""
+        self._assert_backup_admin()
         self.ensure_one()
         try:
             import secrets
@@ -403,6 +413,7 @@ class BackupConfig(models.Model):
     
     def test_retention_policy(self):
         """Test retention policy without actually deleting backups."""
+        self._assert_backup_admin()
         self.ensure_one()
         
         results = []
@@ -472,6 +483,7 @@ class BackupConfig(models.Model):
     
     def cleanup_old_backups(self):
         """Clean up old backups according to retention policy."""
+        self._assert_backup_admin()
         self.ensure_one()
         
         is_manual = self.env.context.get('manual_execution', True)
@@ -884,6 +896,7 @@ class BackupConfig(models.Model):
         
         This method is called by the scheduled action (cron job).
         """
+        self._assert_backup_admin()
         # Find active backup configurations
         configs = self.search([('active', '=', True)])
         

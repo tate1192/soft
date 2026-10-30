@@ -167,6 +167,7 @@ class BackupProviderSftp(models.Model):
     )
 
     # Override abstract methods
+    @api.private
     def test_connection(self):
         """Test SFTP connection and permissions."""
         self.ensure_one()
@@ -250,6 +251,7 @@ class BackupProviderSftp(models.Model):
                 'message': message
             }
 
+    @api.private
     def upload_backup(self, backup_file_path, remote_filename):
         """Upload backup file via SFTP."""
         self.ensure_one()
@@ -369,6 +371,7 @@ class BackupProviderSftp(models.Model):
             'message': 'Remote destination is ready: %s' % self.remote_directory,
         }
 
+    @api.private
     def download_backup(self, remote_filename, local_path):
         """Download backup file via SFTP."""
         self.ensure_one()
@@ -420,6 +423,7 @@ class BackupProviderSftp(models.Model):
                 'message': "Backup downloaded successfully to: %s" % local_path
             }
 
+    @api.private
     def list_backups(self, prefix=None):
         """List backup files on SFTP server."""
         self.ensure_one()
@@ -480,6 +484,7 @@ class BackupProviderSftp(models.Model):
 
         return backups
 
+    @api.private
     def delete_backup(self, remote_filename):
         """Delete backup file from SFTP server."""
         self.ensure_one()
@@ -521,6 +526,7 @@ class BackupProviderSftp(models.Model):
                     }
                 raise
 
+    @api.private
     def get_storage_info(self):
         """Get SFTP storage information."""
         self.ensure_one()

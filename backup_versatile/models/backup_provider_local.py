@@ -65,6 +65,7 @@ class BackupProviderLocal(models.Model):
     )
     
     # Override abstract methods
+    @api.private
     def test_connection(self):
         """Test local directory access and permissions."""
         self.ensure_one()
@@ -131,6 +132,7 @@ class BackupProviderLocal(models.Model):
             )
         return safe
 
+    @api.private
     def upload_backup(self, backup_file_path, remote_filename):
         """Copy backup file to local directory."""
         self.ensure_one()
@@ -189,6 +191,7 @@ class BackupProviderLocal(models.Model):
                 'metadata': {}
             }
     
+    @api.private
     def download_backup(self, remote_filename, local_path):
         """Copy backup file from local directory to specified path."""
         self.ensure_one()
@@ -217,6 +220,7 @@ class BackupProviderLocal(models.Model):
                 'message': "Download failed: %s" % str(e)
             }
     
+    @api.private
     def list_backups(self, prefix=None):
         """List backup files in local directory."""
         self.ensure_one()
@@ -260,6 +264,7 @@ class BackupProviderLocal(models.Model):
             _logger.error("Failed to list backups: %s", str(e))
             return []
     
+    @api.private
     def delete_backup(self, remote_filename):
         """Delete backup file from local directory."""
         self.ensure_one()
@@ -285,6 +290,7 @@ class BackupProviderLocal(models.Model):
                 'message': "Delete failed: %s" % str(e)
             }
     
+    @api.private
     def get_storage_info(self):
         """Get local storage information."""
         self.ensure_one()
