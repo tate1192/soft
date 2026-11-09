@@ -63,6 +63,12 @@ export const SCALE_UNITS = {
     year: "month",
 };
 
+/** Subdivisions a cell can be cut in (the `precision` arch attribute). */
+export const CELL_PRECISIONS = { full: 1, half: 2, quarter: 4 };
+
+/** Scales whose cells (hours or days) can be subdivided by `precision`. */
+export const PRECISION_SCALES = ["day", "week", "month"];
+
 /** Window a scale zooms to when the user picks it in the control panel. */
 export const SCALE_WINDOWS = {
     day: "day",
@@ -598,6 +604,58 @@ export function snapToUnit(start, stop, unit) {
 }
 
 /**
+ * The bar interval, snapped to the subdivisions of the current scale.
+ *
+ * On the day scale the columns are hours and a bar already carries its real
+ * minutes: the quarter hour grid is a *reading* aid there, so the interval is
+ * returned as it is. On the week and month scales the columns are days and the
+ * bars were snapped to the day; with `precision` (a day cut in halves or
+ * quarters) the snap follows the finer cells, so a service starting at 14:00
+ * lands on the 12:00 line of a half day instead of the start of the day.
+ *
+ * Missing ends are handled before this call (``ensureDuration``), so a stop is
+ * present here; a collapsed or inverted interval is widened to one subdivision
+ * rather than drawn empty.
+ *
+ * @param {number|null|undefined} start
+ * @param {number|null|undefined} stop
+ * @param {string} unit the timeline's cell unit
+ * @param {number} [parts] the number of subdivisions in a cell
+ * @returns {{start: (number|null|undefined), stop: (number|null|undefined)}}
+ */
+export function snapToPrecision(start, stop, unit, parts = 1) {
+    if (!parts || parts <= 1) {
+        return snapToUnit(start, stop, unit);
+    }
+    if (unit === "hour") {
+        // The day scale is already read at the minute: the subgrid only helps
+        // the eye, it must not move a service off its real time.
+        return { start, stop };
+    }
+    if (unit !== "day" || start === null || start === undefined) {
+        return snapToUnit(start, stop, unit);
+    }
+    const snapOne = (timestamp) => {
+        const dayStart = startOfLocalDay(timestamp);
+        const span = addLocalDays(dayStart, 1) - dayStart;
+        const index = Math.min(
+            parts - 1,
+            Math.max(0, Math.floor(((timestamp - dayStart) / span) * parts))
+        );
+        return dayStart + (span * index) / parts;
+    };
+    const snappedStart = snapOne(start);
+    let snappedStop = stop === null || stop === undefined ? null : snapOne(stop);
+    if (snappedStop === null || snappedStop <= snappedStart) {
+        const dayStart = startOfLocalDay(snappedStart);
+        const span = addLocalDays(dayStart, 1) - dayStart;
+        const step = span / parts;
+        snappedStop = Math.min(snappedStart + step, dayStart + span);
+    }
+    return { start: snappedStart, stop: snappedStop };
+}
+
+/**
  * Give a record a duration before it is drawn.
  *
  * A record routinely carries a start and no end, and a few carry an end equal
@@ -689,6 +747,103 @@ export function relationIds(value) {
         }
     }
     return ids;
+}
+
+/**
+ * The actions the details card shows, bound to one record.
+ *
+ * The card is a place to act without leaving the chart: the view declares its
+ * buttons, the renderer does not know about them, and the controller receives
+ * one callback per button. Keeping the mapping here makes it testable without
+ * opening a popover.
+ *
+ * @param {Object} archInfo
+ * @param {Object} record the record the card describes
+ * @param {Function} runAction called with (button, record) when the button is clicked
+ * @returns {Array<!Object>} button props for the popover component
+ */
+export function buildPopoverButtons(archInfo, record, runAction) {
+    // The index is part of the key: an arch may declare the same method twice
+    // (two labels for two contexts) and a key that is only type+name would make
+    // Owl's t-foreach see duplicates.
+    return (archInfo.buttons || []).map((button, index) => ({
+        key: `${index}:${button.type}:${button.name}`,
+        label: button.string,
+        icon: button.icon,
+        className: button.class,
+        onClick: () => runAction(button, record),
+    }));
+}
+
+/**
+ * Context defaults for creating a record from the grid.
+ *
+ * A double click on an empty cell (or the "+" of a group row) opens the form of
+ * the model with the groups of the row and, when the click landed on a cell,
+ * the dates of that cell already set: that is what turns the view into a
+ * planning surface instead of a read-only chart. The keys are the
+ * `default_<field>` context keys a form understands; a datetime is written in
+ * UTC, the format the server's `default_get` reads.
+ *
+ * Every level of the row is defaulted, so creating on a nested row lands in the
+ * same team *and* the same service type. A group that is not set (the "Not set"
+ * row) is left without a default instead of defaulting to false.
+ *
+ * @param {Object} archInfo
+ * @param {Object} fields field descriptions of the view's model
+ * @param {Array<{field: string, value: string}>|string|undefined} groupValues
+ *   the groups of the row, from the outer level to the inner one; a plain
+ *   string is accepted for a single level (the first ``group_by`` field)
+ * @param {number|null|undefined} start timestamp of the clicked cell
+ * @param {number|null|undefined} stop timestamp of the clicked cell
+ * @param {Object} context the view context, kept as-is
+ * @returns {Object}
+ */
+export function createContextDefaults(archInfo, fields, groupValues, start, stop, context = {}) {
+    const defaults = {};
+    const firstGroupField = archInfo.groupByFields?.[0] || archInfo.groupByField;
+    const levels = Array.isArray(groupValues)
+        ? groupValues
+        : groupValues === undefined || groupValues === null || groupValues === ""
+          ? []
+          : [{ field: firstGroupField, value: groupValues }];
+    for (const { field: fieldName, value: rawValue } of levels) {
+        const groupField = fieldName && fields[fieldName];
+        if (
+            !groupField ||
+            rawValue === undefined ||
+            rawValue === null ||
+            rawValue === ""
+        ) {
+            continue;
+        }
+        let value = rawValue;
+        if (groupField.type === "many2one") {
+            value = Number(rawValue);
+        } else if (groupField.type === "boolean") {
+            value = rawValue === "true";
+        } else if (groupField.type === "integer") {
+            value = Number(rawValue);
+        }
+        const valid =
+            (groupField.type === "many2one" && Number.isInteger(value) && value > 0) ||
+            (groupField.type === "integer" && Number.isInteger(value)) ||
+            (groupField.type === "boolean" && typeof value === "boolean") ||
+            ["char", "text", "selection"].includes(groupField.type);
+        if (valid) {
+            defaults[`default_${fieldName}`] = value;
+        }
+    }
+    if (start !== null && start !== undefined) {
+        defaults[`default_${archInfo.dateStart}`] = serializeOdooDate(
+            start,
+            archInfo.dateStartType
+        );
+    }
+    if (stop !== null && stop !== undefined) {
+        defaults[`default_${archInfo.dateStop}`] = serializeOdooDate(stop, archInfo.dateStopType);
+    }
+    return { ...context, ...defaults };
 }
 
 /**

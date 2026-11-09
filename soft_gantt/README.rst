@@ -104,11 +104,41 @@ Arch attributes
                        offered ``scales``
 ``scales``             comma separated scales offered to the user; unknown
                        names are refused
+``precision``          subdivisions of the cell of a scale, as a Python dict:
+                       ``precision="{'day': 'hour:quarter', 'week':
+                       'day:half'}"``. The unit must be the scale's own cell
+                       (hours of a day, days of a week or a month) and the
+                       factor one of ``full``, ``half``, ``quarter``. On the
+                       day scale the bars keep their real minutes (the grid is
+                       a reading aid); on the week and month scales they snap
+                       to the finer day parts
 ``default_range``      initial window: ``day``, ``week``, ``month``,
                        ``quarter`` or ``year`` (month)
-``group_by``           optional field the rows are grouped by: one row per
-                       value (a team, a customer), the records of that group
-                       drawn along the timeline
+``group_by``           optional field, or comma separated list of fields,
+                       the rows are grouped by: one row per value of the first
+                       field (a team, a customer), then one row per value of the
+                       next one, ..., and the records of the last level are
+                       drawn along the timeline (``group_by="team_id,type_id"``)
+``group_total``        optional Float/Integer field summed over the records of
+                       a group and shown on its row ("Alpha (3) · Total work:
+                       17.5")
+``group_avatar``       optional binary image field of the outer group's record,
+                       read on the comodel of the first ``group_by`` field and
+                       drawn as an avatar on its row; requires that first level
+                       to be a many2one
+``collapse_first_level``  ``1`` starts with the outer groups folded (folded
+                       into one bar each), which is how a long plan is read
+                       before opening the groups one by one; nested rows stay
+                       open when their parent is unfolded
+``cell_create``        ``1`` turns the grid into a planning surface: a double
+                       click on an empty cell opens the form with that cell's
+                       dates defaulted, the ``+`` of a group row with the group
+                       defaulted
+``decoration-danger``  expression evaluated on the record; a matching bar is
+``decoration-info``    drawn with a ring in that colour. The names are the list
+``decoration-secondary`` view decorations: ``danger``, ``info``, ``secondary``,
+``decoration-success``   ``success`` and ``warning``
+``decoration-warning``
 ``limit``              maximum number of records read per window (default 500)
 ``default_order``      ordering of the rows
 ``open_form_view``     ``1`` opens the record from a bar instead of showing the
@@ -122,12 +152,42 @@ Arch attributes
 Every attribute that can be checked without a browser is validated when the
 view is installed: a misspelled field name, a Char field used as a date, a date
 field the ORM cannot search (the window is read with a domain on it), an
-unknown attribute, a bad ``mode`` or ``scales``, a non-positive ``limit``, a
-read-only field used as a group, a ``milestone`` field that is not a Boolean, a
-``dependencies`` list that points at another model, or a declared ``<field>`` of
-an unrenderable type refuses the view with a message that names the problem. The
+unknown attribute, a bad ``mode``, ``scales`` or ``precision``, a non-positive
+``limit``, a
+``group_by`` level naming an unknown field or a non-groupable type, a
+``milestone`` field that is not a Boolean, a ``dependencies`` list that points at another model, an unknown ``decoration-*``
+name or an empty decoration expression, a ``group_total`` that is not numeric, a
+``group_avatar`` that names no binary field (or a non-many2one ``group_by``), a
+``cell_create``/``collapse_first_level`` that is not one of ``0``/``1``/``true``/
+``false`` (the only spellings the client reads the same way), or a declared
+``<field>`` of an unrenderable type refuses the view with a message that names
+the problem. The
 client parser runs the same checks on views built at runtime, so a broken view
 never shows an empty schedule instead of an error.
+
+Children of the view
+====================
+
+``<field>`` nodes add a value to the tooltip and to the details card.
+``<button>`` nodes add actions to the card, in arch order::
+
+    <gantt_soft date_start="date_start" date_stop="date_stop" ...>
+        <field name="partner_id"/>
+        <button name="action_confirm" type="object" string="Confirm"
+                icon="fa fa-check" confirm="Confirm this operation?"/>
+        <button name="base.action_partner_form" type="action" string="Open partner"/>
+    </gantt_soft>
+
+``type="object"`` calls a public method on the record, ``type="action"`` opens an
+action with that record as its active record. ``confirm`` shows the client's
+confirmation dialog first, ``class`` adds Bootstrap classes to the button, and
+either ``string`` or ``icon`` (or both) draws it. ``string`` and ``confirm`` are
+translatable terms, like the button labels of the other views. The method of an
+``object`` button is checked when the view is installed: a typo is a view error,
+not a button that fails when a user clicks it. The card is a read-only surface,
+so a button is a way to act without leaving the chart: the write rights are the
+method's own and a user who cannot write sees the error of the method, not a
+broken button.
 
 Behaviour
 =========
@@ -153,23 +213,53 @@ Behaviour
   line and a *Today* badge. Should a window ever be too wide for its unit, the
   unit is coarsened until the cells are readable rather than drawing thousand
   stripes. The period label follows the window: a day is named as a day, a week
-  by its two ends, a month by its name.
-* **One row per record, or one row per group.** By default every record is a
-  row. With ``group_by`` the rows are the values of that field (one per team,
-  per customer) and the records of a group are drawn along it: the group
-  vertically, its dates horizontally. Two bars that overlap *on screen* are
-  given a lane each, so the row grows instead of hiding one behind the other: at
-  a day scale that includes two services of the same team on the same day, whose
-  times of day need not overlap. Records whose group is unset keep a row of
-  their own ("Not set"). A many2one group is identified by its id, so two records
-  sharing a name stay apart. A milestone keeps a lane of its own from a bar
-  starting at the same instant: its diamond is drawn around that point, so
-  sharing the lane would put the bar's edge under it.
-* **A bar carries its details.** Clicking a bar opens a card with the two dates
-  and every ``<field>`` the arch declares (dates, booleans, selection labels and
-  many2one names resolved), and an *Open* button that goes to the form. Moving
-  the bar is a drag; reading it is a click, so the two never fight. With
-  ``open_form_view="1"`` the click goes to the form directly.
+  by its two ends, a month by its name. ``precision`` subdivides the cells of a
+  scale into full, half or quarter cells (the hours of a day into quarter
+  hours, the days of a week or a month into half days), drawn as a lighter grid
+  inside the columns: on the day scale the bars keep their stored minutes, on
+  the day-unit scales they snap to the finer day part.
+* **One row per record, one row per group, or a tree of groups.** By default
+  every record is a row. With ``group_by`` the rows are the values of that field
+  (one per team, per customer) and the records of a group are drawn along it: the
+  group vertically, its dates horizontally. ``group_by`` also takes a comma
+  separated list: every level makes a row, the outer levels are header rows that
+  count (and, with ``group_total``, sum) their whole subtree, and the last level
+  holds the bars (``group_by="team_id,type_id"``: team, then service type inside
+  it). A header row folds its whole subtree into one bar; nested rows start open
+  when their parent is unfolded. Two bars that overlap *on screen* are given a
+  lane each, so the row grows instead of hiding one behind the other: at a day
+  scale that includes two services of the same team on the same day, whose times
+  of day need not overlap. Records whose group is unset keep a row of their own
+  ("Not set"). A many2one group is identified by its id, so two records sharing a
+  name stay apart, and a nested group is identified by the *path* of its values,
+  so the same service type under two teams is two rows. A milestone keeps a lane
+  of its own from a bar starting at the same instant: its diamond is drawn around
+  that point, so sharing the lane would put the bar's edge under it.
+* **The grid creates records too.** With ``cell_create="1"`` the empty cells
+  are a planning surface, not wallpaper: a double click opens the form of the
+  model with the clicked cell's dates defaulted (in the format each date field
+  reads), and the ``+`` on a group row opens it with that group defaulted. The
+  view type stays generic: the form is the one the action already offers, so a
+  consumer keeps its own defaults and its own access rights.
+* **A group row says what it holds.** A grouped row reads as *name (count)* and,
+  with ``group_total``, adds the sum of that field over the records of the group
+  ("Alpha (3) · Total work: 17.5"). ``group_avatar`` puts the image of the group
+  record (a team leader, a customer logo) next to the name, and
+  ``collapse_first_level="1"`` starts with every group folded, which is how a
+  plan of a year is read before opening the groups one by one.
+* **Decorations are a second reading.** ``decoration-danger="status == 'cancel'"``
+  (and the other four decoration names) evaluates the expression on the record
+  and draws a ring inside the matching bars: the bar colour still says what the
+  ``color`` field says, while the ring flags a second fact (late, priority,
+  cancellation) without a new field for it. The fields an expression reads are
+  requested with the window even when the arch does not declare them.
+* **A bar carries its details and its actions.** Clicking a bar opens a card
+  with the two dates and every ``<field>`` the arch declares (dates, booleans,
+  selection labels and many2one names resolved), the ``<button>`` actions the
+  arch declares (a method call or an action, with an optional confirmation),
+  and an *Open* button that goes to the form. Moving the bar is a drag; reading
+  it is a click, so the two never fight. With ``open_form_view="1"`` the click
+  goes to the form directly.
 * **Search first.** Records come from the action's domain plus whatever the
   search bar applies: filters and favourites really reload the view. Grouping
   through the search bar is not offered, because the rows of this view are the

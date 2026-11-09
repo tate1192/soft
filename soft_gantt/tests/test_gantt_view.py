@@ -279,6 +279,187 @@ class TestSoftGanttView(TransactionCase):
         )
         self.assertEqual(view.type, 'gantt_soft')
 
+
+    # ------------------------------------------------------------------
+    # Decorations, group summaries, avatars and grid creation
+    # ------------------------------------------------------------------
+
+    def test_decorations_are_accepted_on_the_root_node(self):
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'decoration-danger="is_company" decoration-success="name == \'Acme\'"/>'
+        )
+        self.assertEqual(view.type, 'gantt_soft')
+
+    def test_an_unknown_decoration_is_refused(self):
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'decoration-whatever="true"/>'
+        )
+
+    def test_an_empty_decoration_expression_is_refused(self):
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'decoration-danger=""/>'
+        )
+
+    def test_a_decoration_reading_an_unknown_field_is_refused(self):
+        # Base's generic decoration processing resolves the identifiers and
+        # refuses a field the model does not have, like a list view would.
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'decoration-danger="not_a_field == 1"/>'
+        )
+
+    def test_group_total_must_be_numeric(self):
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="company_id" group_total="color"/>'
+        )
+        self.assertEqual(view.type, 'gantt_soft')
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="company_id" group_total="name"/>'
+        )
+
+    def test_group_by_accepts_several_levels(self):
+        """``group_by`` is a comma separated list of grouping levels."""
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="company_id,color" group_total="color"/>'
+        )
+        self.assertEqual(view.type, 'gantt_soft')
+
+    def test_group_by_refuses_an_invalid_level(self):
+        for arch in (
+            # The second level does not exist.
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="company_id,not_a_field"/>',
+            # The second level is a date: a date is the timeline, not a row.
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="company_id,create_date"/>',
+            # An empty list names no level.
+            '<gantt_soft date_start="create_date" date_stop="write_date" group_by=","/>',
+        ):
+            self._assert_arch_is_refused(arch)
+
+    def test_group_avatar_requires_a_many2one_group_with_an_image_field(self):
+        # ``res.partner.image_1920`` is the image field, ``parent_id`` a
+        # many2one to another partner.
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="parent_id" group_avatar="image_1920"/>'
+        )
+        self.assertEqual(view.type, 'gantt_soft')
+        for arch in (
+            # The field exists on the group's model but is not binary.
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="parent_id" group_avatar="name"/>',
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="parent_id" group_avatar="no_such_field"/>',
+            # No group row to draw it on.
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_avatar="image_1920"/>',
+            # The group is not a many2one.
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="color" group_avatar="image_1920"/>',
+        ):
+            self._assert_arch_is_refused(arch)
+
+    def test_collapse_first_level_and_cell_create_are_booleans(self):
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'group_by="company_id" collapse_first_level="1" cell_create="1"/>'
+        )
+        self.assertEqual(view.type, 'gantt_soft')
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'cell_create="sometimes"/>'
+        )
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'collapse_first_level="maybe"/>'
+        )
+        # `str2bool` would accept these as false while the client reads them as
+        # true: only the values both sides read the same way are accepted.
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'cell_create="off"/>'
+        )
+        self._assert_arch_is_refused(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            'collapse_first_level="no"/>'
+        )
+
+    # ------------------------------------------------------------------
+    # Cell precision
+    # ------------------------------------------------------------------
+
+    def test_precision_is_accepted(self):
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date" '
+            "precision=\"{'day': 'hour:quarter', 'week': 'day:half'}\"/>"
+        )
+        self.assertEqual(view.type, 'gantt_soft')
+
+    def test_precision_is_validated(self):
+        for precision in (
+            # The day scale is read in hours, not in days.
+            "{'day': 'day:half'}",
+            # Only full, half and quarter subdivisions exist.
+            "{'day': 'hour:eighth'}",
+            # A week is a quarter scale's cell: it cannot be subdivided.
+            "{'quarter': 'week:half'}",
+            # Not a scale of this view type.
+            "{'fortnight': 'day:half'}",
+            # Not a dict at all.
+            "'day'",
+        ):
+            self._assert_arch_is_refused(
+                '<gantt_soft date_start="create_date" date_stop="write_date" '
+                'precision="%s"/>' % precision
+            )
+
+    # ------------------------------------------------------------------
+    # Actions of the details card
+    # ------------------------------------------------------------------
+
+    def test_card_buttons_are_accepted(self):
+        """A view may offer actions on the record from the details card."""
+        view = self._create_view(
+            '<gantt_soft date_start="create_date" date_stop="write_date">'
+            '<field name="name"/>'
+            '<button name="toggle_active" type="object" string="Archive" icon="fa fa-archive"/>'
+            '<button name="base.action_partner_form" type="action" string="Open"/>'
+            '<button name="toggle_active" type="object" icon="fa fa-check" confirm="Are you sure?" class="btn-danger"/>'
+            '</gantt_soft>'
+        )
+        self.assertEqual(view.type, 'gantt_soft')
+
+    def test_card_button_is_validated(self):
+        for arch in (
+            # No method / action named.
+            '<gantt_soft date_start="create_date" date_stop="write_date">'
+            '<button type="object" string="Archive"/></gantt_soft>',
+            # Not a supported type.
+            '<gantt_soft date_start="create_date" date_stop="write_date">'
+            '<button name="toggle_active" type="method" string="Archive"/></gantt_soft>',
+            # A method the model does not have.
+            '<gantt_soft date_start="create_date" date_stop="write_date">'
+            '<button name="not_a_method" type="object" string="Archive"/></gantt_soft>',
+            # Private methods are not actions.
+            '<gantt_soft date_start="create_date" date_stop="write_date">'
+            '<button name="_compute_display_name" type="object" string="Archive"/></gantt_soft>',
+            # Nothing would be drawn on the button.
+            '<gantt_soft date_start="create_date" date_stop="write_date">'
+            '<button name="toggle_active" type="object"/></gantt_soft>',
+            # An attribute that is not a button attribute.
+            '<gantt_soft date_start="create_date" date_stop="write_date">'
+            '<button name="toggle_active" type="object" string="Archive" groups="base.group_user"/>'
+            '</gantt_soft>',
+        ):
+            self._assert_arch_is_refused(arch)
+
     # ------------------------------------------------------------------
     # The module is a view type, not a business module
     # ------------------------------------------------------------------

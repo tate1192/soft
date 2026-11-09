@@ -4,6 +4,7 @@ import { useBus, useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 import { formatDate, formatDateTime, parseDate, parseDateTime } from "@web/core/l10n/dates";
 import { usePopover } from "@web/core/popover/popover_hook";
+import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { useModel } from "@web/model/model";
 import {
     addFieldDependencies,
@@ -21,7 +22,9 @@ import {
     DAY_MS,
     addFieldDays,
     buildCsv,
+    buildPopoverButtons,
     clampResize,
+    createContextDefaults,
     dateTimeInUserZone,
     defaultWindowReference,
     downloadTextFile,
@@ -77,6 +80,8 @@ export class GanttSoftController extends Component {
     setup() {
         this.orm = useService("orm");
         this.notification = useService("notification");
+        this.actionService = useService("action");
+        this.dialogService = useService("dialog");
         // The card is anchored on the bar it belongs to, and escapes the view
         // when a click would otherwise take the reader to another screen. Its
         // own container class is what lets the stylesheet theme the card (and
@@ -92,6 +97,12 @@ export class GanttSoftController extends Component {
         // Fields the view needs beyond the ones it declares: the two dates, the
         // bar label, and the optional progress / colour / milestone /
         // dependencies fields.
+        const groupByFields =
+            archInfo.groupByFields?.length > 0
+                ? archInfo.groupByFields
+                : archInfo.groupByField
+                  ? [archInfo.groupByField]
+                  : [];
         const requiredFields = [
             "display_name",
             archInfo.dateStart,
@@ -99,7 +110,9 @@ export class GanttSoftController extends Component {
             archInfo.labelField,
             archInfo.progressField,
             archInfo.colorField,
-            archInfo.groupByField,
+            ...groupByFields,
+            archInfo.groupTotalField,
+            ...archInfo.expressionFields,
             archInfo.milestoneField,
             archInfo.dependenciesField,
         ].filter(Boolean);
@@ -172,12 +185,18 @@ export class GanttSoftController extends Component {
     get rendererProps() {
         return {
             archInfo: this.props.archInfo,
+            fields: this.props.fields,
             records: this.model.records,
             scale: this.state.scale,
             window: this.window,
             canEdit: this.canEdit,
             collapsed: this.state.collapsedGroups,
+            defaultCollapsed: this.props.archInfo.collapseFirstLevel,
+            canCellCreate:
+                this.props.archInfo.cellCreate &&
+                Boolean(this.props.archInfo.activeActions?.create),
             onBarClick: this.onBarClick.bind(this),
+            onCreateAt: this.onCreateAt.bind(this),
             onReschedule: this.onReschedule.bind(this),
             onResize: this.onResize.bind(this),
             onToggleGroup: this.onToggleGroup.bind(this),
@@ -329,8 +348,15 @@ export class GanttSoftController extends Component {
     exportCsv() {
         const { archInfo, fields, resModel } = this.props;
         const extraNames = Object.values(archInfo.fieldNodes).map((info) => info.name);
+        const groupByFields =
+            archInfo.groupByFields?.length > 0
+                ? archInfo.groupByFields
+                : archInfo.groupByField
+                  ? [archInfo.groupByField]
+                  : [];
         const header = [
             _t("Name"),
+            ...groupByFields.map((name) => fields[name]?.string || name),
             fields[archInfo.dateStart]?.string || archInfo.dateStart,
             fields[archInfo.dateStop]?.string || archInfo.dateStop,
             _t("Duration (days)"),
@@ -343,6 +369,7 @@ export class GanttSoftController extends Component {
             const stop = parseOdooFieldDate(record[archInfo.dateStop], archInfo.dateStopType);
             const row = [
                 record.display_name || `#${record.id}`,
+                ...groupByFields.map((name) => this._fieldValue(name, record[name])),
                 this._csvDate(start, archInfo.dateStartType),
                 this._csvDate(stop, archInfo.dateStopType),
                 start !== null && stop !== null ? Math.round(((stop - start) / DAY_MS) * 10) / 10 : "",
@@ -381,6 +408,7 @@ export class GanttSoftController extends Component {
         this.popover.open(element, {
             title: row.label,
             fields: this._popoverFields(row.record),
+            buttons: this._popoverButtons(row.record),
             open: () => {
                 this.popover.close();
                 if (this.props.selectRecord) {
@@ -388,6 +416,39 @@ export class GanttSoftController extends Component {
                 }
             },
         });
+    }
+
+    /**
+     * Create a record from the grid: a double click on an empty cell, or the
+     * "+" of a group row.
+     *
+     * The view has no form of its own (a view type is not a model), so the work
+     * is delegated to the form of the action the view is opened from: the
+     * dialog creates the record, and the defaults carry what the grid already
+     * knows: the group of the row and the dates of the clicked cell.
+     */
+    async onCreateAt({ row, start, stop }) {
+        if (!this.props.selectRecord || !this.props.archInfo.activeActions?.create) {
+            return;
+        }
+        const context = createContextDefaults(
+            this.props.archInfo,
+            this.props.fields,
+            row?.groupValues,
+            start,
+            stop,
+            this.props.context
+        );
+        await this.actionService.doAction(
+            {
+                type: "ir.actions.act_window",
+                res_model: this.props.resModel,
+                views: [[false, "form"]],
+                target: "new",
+                context,
+            },
+            { onClose: () => this.model.reload() }
+        );
     }
 
     /**
@@ -429,6 +490,43 @@ export class GanttSoftController extends Component {
             add(fieldInfo.name, this._fieldValue(fieldInfo.name, record[fieldInfo.name]));
         }
         return rows;
+    }
+
+    /**
+     * The actions the arch declares, bound to the record of the clicked bar.
+     *
+     * The card is a place to act without leaving the chart: a button calls a
+     * method on this very record (``type="object"``) or opens an action
+     * (``type="action"``), and a ``confirm`` opens the client's confirmation
+     * dialog first, like a button of a form view.
+     */
+    _popoverButtons(record) {
+        return buildPopoverButtons(this.props.archInfo, record, (button, rec) =>
+            this._runPopoverButton(button, rec)
+        );
+    }
+
+    async _runPopoverButton(button, record) {
+        const execute = async () => {
+            this.popover.close();
+            await this.actionService.doActionButton({
+                type: button.type,
+                name: button.name,
+                resModel: this.props.resModel,
+                resId: record.id,
+                context: this.props.context,
+                onClose: () => this.model.reload(),
+            });
+        };
+        if (button.confirm) {
+            this.dialogService.add(ConfirmationDialog, {
+                body: button.confirm,
+                confirm: () => execute(),
+                cancel: () => {},
+            });
+        } else {
+            await execute();
+        }
     }
 
     /** A record value as text: dates, booleans, selections and many2ones included. */
@@ -559,7 +657,17 @@ export class GanttSoftController extends Component {
      * and follows the reader through the scale and the window. A useState
      * object is reactive key by key, so writing straight into it is enough.
      */
-    onToggleGroup(key) {
-        this.state.collapsedGroups[key] = !this.state.collapsedGroups[key];
+    onToggleGroup(key, collapsed) {
+        // The renderer hands the state the row is *drawn* in, not the map entry:
+        // a group folded by `collapse_first_level` has no entry yet, and
+        // toggling the entry alone would write "folded" on the first click — a
+        // dead click for the reader — instead of opening the group. The map is
+        // replaced rather than mutated: a key that did not exist is a new
+        // object property, and replacing the value is what re-renders the
+        // renderer with the new state.
+        this.state.collapsedGroups = {
+            ...this.state.collapsedGroups,
+            [key]: !collapsed,
+        };
     }
 }

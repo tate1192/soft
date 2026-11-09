@@ -4,7 +4,9 @@ import { user } from "@web/core/user";
 import {
     addFieldDays,
     buildCsv,
+    buildPopoverButtons,
     clampResize,
+    createContextDefaults,
     csvEscape,
     defaultWindowReference,
     fieldText,
@@ -13,6 +15,8 @@ import {
     parseOdooFieldDate,
     relationIds,
     serializeOdooDate,
+    snapToPrecision,
+    snapToUnit,
     windowRange,
 } from "@soft_gantt/gantt/gantt_utils";
 
@@ -280,4 +284,236 @@ describe("defaultWindowReference", () => {
             expect(defaultWindowReference(range, sunday)).toBe(sunday);
         }
     });
+});
+
+describe("createContextDefaults", () => {
+    const archInfo = {
+        dateStart: "date_start",
+        dateStartType: "datetime",
+        dateStop: "date_deadline",
+        dateStopType: "datetime",
+        groupByField: "team_id",
+    };
+    const fields = {
+        team_id: { type: "many2one", relation: "project.team" },
+        active: { type: "boolean" },
+        label: { type: "char" },
+        sequence: { type: "integer" },
+    };
+
+    test("defaults the many2one group with the id the row stands for", () => {
+        const context = createContextDefaults(archInfo, fields, [{ field: "team_id", value: "7" }], null, null, {
+            default_company_id: 3,
+        });
+        expect(context.default_team_id).toBe(7);
+        // The view context is kept: the action may already set defaults.
+        expect(context.default_company_id).toBe(3);
+    });
+
+    test("defaults the clicked cell's dates in UTC", () => {
+        const start = Date.UTC(2026, 2, 3, 8, 0);
+        const stop = Date.UTC(2026, 2, 3, 9, 0);
+        const context = createContextDefaults(archInfo, fields, [], start, stop);
+        expect(context.default_date_start).toBe("2026-03-03 08:00:00");
+        expect(context.default_date_deadline).toBe("2026-03-03 09:00:00");
+    });
+
+    test("a date field defaults its date part", () => {
+        const context = createContextDefaults(
+            { ...archInfo, dateStartType: "date", dateStopType: "date" },
+            fields,
+            [],
+            Date.UTC(2026, 2, 3),
+            Date.UTC(2026, 2, 4)
+        );
+        expect(context.default_date_start).toBe("2026-03-03");
+        expect(context.default_date_deadline).toBe("2026-03-04");
+    });
+
+    test("converts a boolean group key and keeps a char one", () => {
+        const boolean = createContextDefaults(
+            { ...archInfo, groupByField: "active" },
+            fields,
+            [{ field: "active", value: "true" }],
+            null,
+            null
+        );
+        expect(boolean.default_active).toBe(true);
+
+        const label = createContextDefaults(
+            { ...archInfo, groupByField: "label" },
+            fields,
+            [{ field: "label", value: "Acme" }],
+            null,
+            null
+        );
+        expect(label.default_label).toBe("Acme");
+    });
+
+
+    test("defaults every level of a multi-level group", () => {
+        const multiArchInfo = {
+            ...archInfo,
+            groupByField: "team_id",
+            groupByFields: ["team_id", "service_type_id"],
+        };
+        const multiFields = {
+            ...fields,
+            service_type_id: { type: "selection" },
+        };
+        const context = createContextDefaults(
+            multiArchInfo,
+            multiFields,
+            [
+                { field: "team_id", value: "7" },
+                { field: "service_type_id", value: "cleaning" },
+            ],
+            null,
+            null
+        );
+        expect(context.default_team_id).toBe(7);
+        expect(context.default_service_type_id).toBe("cleaning");
+    });
+
+    test("leaves an unset middle level without a default", () => {
+        const multiArchInfo = {
+            ...archInfo,
+            groupByField: "team_id",
+            groupByFields: ["team_id", "service_type_id"],
+        };
+        const context = createContextDefaults(
+            multiArchInfo,
+            { ...fields, service_type_id: { type: "selection" } },
+            [
+                { field: "team_id", value: "7" },
+                { field: "service_type_id", value: "" },
+            ],
+            null,
+            null
+        );
+        expect(context.default_team_id).toBe(7);
+        expect("default_service_type_id" in context).toBe(false);
+    });
+
+    test("accepts the single level as a plain value", () => {
+        // The renderer always sends a list; the plain form keeps the helper
+        // usable for a single level without a list.
+        const context = createContextDefaults(archInfo, fields, "9", null, null);
+        expect(context.default_team_id).toBe(9);
+    });
+    test("does not default a group that is not set", () => {
+        const context = createContextDefaults(archInfo, fields, [], null, null);
+        expect("default_team_id" in context).toBe(false);
+        expect("default_date_start" in context).toBe(false);
+    });
+
+describe("buildPopoverButtons", () => {
+    const archInfo = {
+        buttons: [
+            {
+                name: "action_done",
+                type: "object",
+                string: "Done",
+                icon: "fa fa-check",
+                confirm: "",
+                class: "btn-danger",
+            },
+            {
+                name: "base.action_partner_form",
+                type: "action",
+                string: "Open partner",
+                icon: "",
+                confirm: "",
+                class: "",
+            },
+        ],
+    };
+    const record = { id: 7, display_name: "FO/0007" };
+
+    test("maps the arch buttons, in order, with their label, icon and class", () => {
+        const buttons = buildPopoverButtons(archInfo, record, () => {});
+        expect(buttons.map((button) => button.key)).toEqual([
+            "0:object:action_done",
+            "1:action:base.action_partner_form",
+        ]);
+        expect(buttons.map((button) => button.label)).toEqual(["Done", "Open partner"]);
+        expect(buttons[0].icon).toBe("fa fa-check");
+        expect(buttons[0].className).toBe("btn-danger");
+        expect(buttons[1].className).toBe("");
+    });
+
+    test("a click hands the arch button and the record to the controller", () => {
+        const calls = [];
+        const buttons = buildPopoverButtons(archInfo, record, (button, rec) =>
+            calls.push([button.name, rec.id])
+        );
+        buttons[0].onClick();
+        expect(calls).toEqual([["action_done", 7]]);
+    });
+
+    test("a view without buttons offers none", () => {
+        expect(buildPopoverButtons({}, record, () => {})).toEqual([]);
+    });
+});
+
+describe("snapToPrecision", () => {
+    const value = (text) => parseOdooFieldDate(text, "datetime");
+
+    test("without subdivisions it is the unit snap", () => {
+        const start = value("2026-03-03 08:07:00");
+        const stop = value("2026-03-03 10:52:00");
+        expect(snapToPrecision(start, stop, "hour", 1)).toEqual(
+            snapToUnit(start, stop, "hour")
+        );
+        expect(snapToPrecision(start, stop, "day", 1)).toEqual(
+            snapToUnit(start, stop, "day")
+        );
+    });
+
+    test("the day scale keeps the real minutes: its subgrid is a reading aid", () => {
+        const start = value("2026-03-03 08:07:00");
+        const stop = value("2026-03-03 09:52:00");
+        expect(snapToPrecision(start, stop, "hour", 4)).toEqual({ start, stop });
+    });
+
+    test("a day cut in quarters snaps the ends to quarter days", () => {
+        const snapped = snapToPrecision(
+            value("2026-03-03 08:07:00"),
+            value("2026-03-04 05:52:00"),
+            "day",
+            4
+        );
+        expect(snapped.start).toBe(value("2026-03-03 06:00:00"));
+        expect(snapped.stop).toBe(value("2026-03-04 00:00:00"));
+    });
+
+    test("a day cut in halves snaps an afternoon start to noon", () => {
+        const snapped = snapToPrecision(
+            value("2026-03-03 14:00:00"),
+            value("2026-03-04 05:00:00"),
+            "day",
+            2
+        );
+        expect(snapped.start).toBe(value("2026-03-03 12:00:00"));
+        expect(snapped.stop).toBe(value("2026-03-04 00:00:00"));
+    });
+
+    test("a single instant becomes one subdivision", () => {
+        const instant = value("2026-03-03 08:07:00");
+        const snapped = snapToPrecision(instant, instant, "day", 4);
+        expect(snapped.start).toBe(value("2026-03-03 06:00:00"));
+        expect(snapped.stop).toBe(value("2026-03-03 12:00:00"));
+    });
+
+    test("an inverted interval is widened instead of drawn empty", () => {
+        const snapped = snapToPrecision(
+            value("2026-03-03 18:00:00"),
+            value("2026-03-03 08:00:00"),
+            "day",
+            2
+        );
+        expect(snapped.start).toBe(value("2026-03-03 12:00:00"));
+        expect(snapped.stop).toBe(value("2026-03-04 00:00:00"));
+    });
+});
 });
