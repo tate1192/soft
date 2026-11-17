@@ -9,7 +9,7 @@ LibreOffice; `output_format = original` returns the docx unchanged.
 | Requirement | Notes |
 |---|---|
 | Odoo 19.0 | Community or Enterprise |
-| LibreOffice (`soffice`) | Only for PDF / HTML / ODT / RTF output. `output_format = original` (docx) works without it. |
+| LibreOffice (`soffice`) | Only for PDF / HTML / ODT / RTF output. `output_format = original` (docx) works without it. Declared in `external_dependencies`, so Odoo 19 blocks install/upgrade with `apt install libreoffice-writer` as the hint when the binary is missing; set `bin_path` if `soffice.exe` is not on `PATH` (Windows). |
 | `lxml`, `Pillow` | Ship with Odoo (`requirements.txt`); Pillow is optional (image size falls back to header parsing). |
 | `pypdf` or `PyPDF2` | Only for merging several PDFs into one; `pypdf` is preferred, `PyPDF2` is accepted. |
 
@@ -231,8 +231,10 @@ route answers **404** outside the group) and check read access on the record.
   supported.
 * `{{=…}}` cannot call ORM methods or touch the environment (by design).
 * Images are sized at 96 dpi and capped at 15 × 10 cm.
-* LibreOffice is required for every non-docx output; without it the module
-  raises a `UserError` with install hints.
+* LibreOffice is required for every non-docx output. The binary is declared in
+  the manifest, so an Odoo host without it cannot install or upgrade the module
+  (the check is module-wide, docx-only installations included); at runtime the
+  generation code raises a `UserError` with OS-specific install hints.
 * A conversion is started per print request with its own LibreOffice profile —
   expect a few seconds per document on a busy server.
 
