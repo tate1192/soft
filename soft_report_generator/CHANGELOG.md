@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [19.0.1.0.2] - 2026-11-17
+
+### Changed
+
+- Packaging: LibreOffice is declared as an external dependency
+  (`'external_dependencies': {'bin': ['soffice'], 'apt': {'soffice':
+  'libreoffice-writer'}}`). Odoo 19 now refuses to install or upgrade the module
+  on a host without the binary and names the apt package in the error
+  (*It can be installed running: apt install libreoffice-writer*), instead of
+  the gap surfacing only on the first PDF print as a runtime `UserError`.
+  Docx-only use (`output_format = original`) still works on a host that has the
+  binary; on Windows, where `soffice.exe` may not be on `PATH`, point the
+  `bin_path` setting at the LibreOffice `program` folder.
+
 ### Fixed
 
 - DOCX: an HTML field in a paragraph no longer deletes the text runs written

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Soft Report Generator - Word Template Engine',
-    'version': '19.0.1.0.1',
+    'version': '19.0.1.0.2',
     'category': 'Productivity',
     'summary': 'Word (.docx) templates -> PDF via LibreOffice; '
                'placeholder mapping, table loops, conditions, HTML fields',
@@ -20,6 +20,15 @@ model technical names (``soft.report.template`` and friends) are unchanged.
     'website': 'https://softteknik.com',
     'license': 'AGPL-3',
     'depends': ['base', 'mail'],
+    'external_dependencies': {
+        'bin': ['soffice'],
+        # Odoo 19 turns a missing ``bin`` entry into an install/upgrade error
+        # that names the apt package when the map below has one:
+        #   Unable to install module "soft_report_generator" because an
+        #   external dependency is not met: Unable to find 'soffice' in path
+        #   It can be installed running: apt install libreoffice-writer
+        'apt': {'soffice': 'libreoffice-writer'},
+    },
     'data': [
         'security/security.xml',
         'security/ir.model.access.csv',
