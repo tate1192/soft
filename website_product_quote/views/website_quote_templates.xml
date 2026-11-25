@@ -16,9 +16,20 @@
 
         <!-- v19: o_wsale_cta_wrapper artik ayri bir sablonda (website_sale.cta_wrapper)
              t-call ile cagriliyor; website_sale.product icinden bulunamaz.
-             Bu yuzden cagriyi (t-call) bizim CTA blogumuzla degistiriyoruz. -->
+             Bu yuzden cagriyi (t-call) bizim CTA blogumuzla degistiriyoruz.
+
+             DIKKAT: t-call'u replace ettigimiz icin website_sale_stock'un bu sablona
+             ekledigi hook dugumleri kayboluyor. JS bunlari korumasiz sorguluyor
+             (website_sale_stock/static/src/js/variant_mixin.js ->
+             this.el.querySelector('div.availability_messages').append(...)),
+             eksik oldugunda varyant degistirirken
+             "Cannot read properties of null (reading 'append')" hatasi cikiyor.
+             Bu yuzden core'un ekledigi hook'lari burada elle birakiyoruz. -->
         <xpath expr="//t[@t-call='website_sale.cta_wrapper']" position="replace">
             <div id="o_wsale_cta_wrapper" class="d-flex oe_structure oe_structure_solo">
+                <div class="availability_messages o_not_editable"/>
+                <input t-if="is_view_active('website_sale_stock.website_sale_stock_product')"
+                       id="wsale_user_email" type="hidden" t-att-value="user_email"/>
                 <section class="s_text_block" data-snippet="s_text_block" data-name="Text">
                     <div class="container">
                         <button type="button" class="btn btn-primary btn_cta" data-bs-toggle="modal"
