@@ -43,9 +43,12 @@
 
         <!--        <xpath expr="//div[@id='product_details']//div[hasclass('alert-info')]" position="replace"/>-->
 
-        <!-- Modal Penceresini Sayfaya Ekle (Genellikle body sonuna yakın bir yere eklenir) -->
-        <!-- Bu xpath, ana ürün konteynerinin sonuna ekler -->
-        <xpath expr="//div[@id='product_details']" position="inside">
+        <!-- Modal Penceresini Sayfaya Ekle.
+             DIKKAT: modal'i #product_details icine koymayin. O kolon sticky ve z-index:0 ile
+             kendi stacking context'ini aciyor; modal z-index 1055 olsa bile o context icinde
+             kaliyor ve urun gorseli (o_wsale_product_images, z-index:1) modal formunun
+             uzerine biniyor. #wrap seviyesinde birakinca dogru calisiyor. -->
+        <xpath expr="//div[@id='wrap']" position="inside">
             <div class="modal fade" id="quoteModal" tabindex="-1" aria-labelledby="quoteModalLabel" aria-hidden="true">
                 <div class="modal-dialog modal-dialog-centered">
                     <div class="modal-content">
