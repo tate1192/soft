@@ -1,0 +1,12 @@
+
+
+.container.mt-4 {
+    max-width: 800px;
+}
+.form-group {
+    margin-bottom: 15px;
+}
+.btn-primary {
+    background-color: #007bff;
+    border-color: #007bff;
+}
