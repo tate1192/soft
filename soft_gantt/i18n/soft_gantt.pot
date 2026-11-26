@@ -6,8 +6,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 19.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-29 15:59+0000\n"
-"PO-Revision-Date: 2026-10-29 15:59+0000\n"
+"POT-Creation-Date: 2026-11-26 18:23+0000\n"
+"PO-Revision-Date: 2026-11-26 18:23+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
 "MIME-Version: 1.0\n"
@@ -36,7 +36,22 @@ msgstr ""
 #. module: soft_gantt
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
-msgid "A gantt_soft view can only contain <field> nodes, got <%(tag)s>."
+msgid "A <button> of a gantt_soft view must name a method or an action."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"A <button> of a gantt_soft view needs a string or an icon: the card would "
+"draw an empty button otherwise."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"A gantt_soft view can only contain <field> or <button> nodes, got <%(tag)s>."
 msgstr ""
 
 #. module: soft_gantt
@@ -48,6 +63,12 @@ msgstr ""
 #. odoo-javascript
 #: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
 msgid "CSV"
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "CSV contains only the first %s records of this window."
 msgstr ""
 
 #. module: soft_gantt
@@ -103,6 +124,14 @@ msgstr ""
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
 msgid ""
+"Field %(field)r on %(comodel)s, used as group_avatar in a gantt_soft view, "
+"must be a binary image field, not %(type)s."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
 "Field %(field)r used as %(attribute)s in a gantt_soft view must be of type "
 "%(types)s, not %(type)s."
 msgstr ""
@@ -111,8 +140,24 @@ msgstr ""
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
 msgid ""
+"Field %(field)r used as %(attribute)s in a gantt_soft view must be stored or"
+" searchable: the window is read with a domain on it."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
 "Field %(field)r used as dependencies in a gantt_soft view must point at "
 "%(model)s, not at %(comodel)s."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Field %(field)r used as group_by in a gantt_soft view must be of type "
+"%(types)s, not %(type)s."
 msgstr ""
 
 #. module: soft_gantt
@@ -158,6 +203,22 @@ msgstr ""
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
 msgid ""
+"Invalid attribute(s) %(invalid)s on a <button> of a gantt_soft view. Valid "
+"attributes are: %(valid)s"
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid decoration %(attribute)s in a gantt_soft view. Valid decorations "
+"are: %(decorations)s"
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
 "Invalid default_range %(range)r in gantt_soft view. Valid ranges are: "
 "%(ranges)s"
 msgstr ""
@@ -168,6 +229,22 @@ msgstr ""
 msgid ""
 "Invalid mode %(mode)r in gantt_soft view. It must be one of the view's "
 "scales: %(scales)s"
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid precision %(value)r for the %(scale)r scale of a gantt_soft view "
+"(expected %(unit)r:<%(values)s>)."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid scale %(scale)r in the precision of a gantt_soft view (expected one "
+"of %(scales)s)."
 msgstr ""
 
 #. module: soft_gantt
@@ -200,6 +277,12 @@ msgstr ""
 #. odoo-javascript
 #: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
 msgid "New"
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "New record in this group"
 msgstr ""
 
 #. module: soft_gantt
@@ -241,6 +324,14 @@ msgstr ""
 
 #. module: soft_gantt
 #. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid ""
+"Only the first %s records of this window are shown; narrow the period to see"
+" the rest."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-javascript
 #: code:addons/soft_gantt/static/src/gantt/gantt_popover.xml:0
 msgid "Open"
 msgstr ""
@@ -265,6 +356,18 @@ msgstr ""
 
 #. module: soft_gantt
 #. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Resize end"
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Resize start"
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-javascript
 #: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
 msgid "Show the period containing today"
 msgstr ""
@@ -279,7 +382,61 @@ msgstr ""
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
 msgid ""
+"The %(attribute)s attribute of a gantt_soft view must be a boolean (0, 1, "
+"true or false), got %(value)r."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The %(attribute)s attribute of a gantt_soft view must be an expression."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The %(scale)r scale cannot be subdivided: the precision attribute is "
+"available on %(scales)s."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The group_avatar attribute of a gantt_soft view requires a many2one "
+"group_by: %(field)r is a %(type)s."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The group_avatar attribute of a gantt_soft view requires the group_by "
+"attribute: there is no group row to draw it on."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The group_by attribute of a gantt_soft view must name at least one field."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
 "The limit of a gantt_soft view must be a positive integer, got %(limit)r."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The precision attribute of a gantt_soft view must be a dict like {'day': "
+"'hour:quarter'}."
 msgstr ""
 
 #. module: soft_gantt
@@ -288,6 +445,14 @@ msgstr ""
 msgid ""
 "The scales attribute of a gantt_soft view must list at least one of: "
 "%(scales)s"
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The type of a <button> of a gantt_soft view must be one of %(types)s, got "
+"%(type)r."
 msgstr ""
 
 #. module: soft_gantt
@@ -300,8 +465,31 @@ msgstr ""
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
 msgid ""
+"Unknown field %(field)r on %(comodel)s, used as group_avatar in a gantt_soft"
+" view."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
 "Unknown field %(field)r used as %(attribute)s in a gantt_soft view of "
 "%(model)s."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Unknown field %(field)r used as group_by in a gantt_soft view of %(model)s."
+msgstr ""
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Unknown method %(name)r on %(model)s, used as the type object <button> of a "
+"gantt_soft view."
 msgstr ""
 
 #. module: soft_gantt

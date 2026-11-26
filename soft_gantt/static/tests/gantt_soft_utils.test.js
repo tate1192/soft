@@ -437,6 +437,7 @@ describe("buildPopoverButtons", () => {
             "1:action:base.action_partner_form",
         ]);
         expect(buttons.map((button) => button.label)).toEqual(["Done", "Open partner"]);
+        expect(buttons.map((button) => button.ariaLabel)).toEqual(["Done", "Open partner"]);
         expect(buttons[0].icon).toBe("fa fa-check");
         expect(buttons[0].className).toBe("btn-danger");
         expect(buttons[1].className).toBe("");

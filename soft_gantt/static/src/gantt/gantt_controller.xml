@@ -19,16 +19,16 @@
                 <t t-set-slot="layout-buttons">
                     <div class="o_gantt_soft_window_buttons btn-group" role="group" aria-label="Period">
                         <button type="button" class="btn btn-secondary" t-on-click="previousWindow"
-                                t-att-title="previousTitle">
-                            <i class="fa fa-chevron-left"/>
+                                t-att-title="previousTitle" t-att-aria-label="previousTitle">
+                            <i class="fa fa-chevron-left" aria-hidden="true"/>
                         </button>
                         <button type="button" class="btn btn-secondary o_gantt_soft_window_label"
                                 t-on-click="todayWindow" t-att-title="todayTitle">
-                            <i class="fa fa-calendar me-1"/><t t-esc="windowLabel"/>
+                            <i class="fa fa-calendar me-1" aria-hidden="true"/><t t-esc="windowLabel"/>
                         </button>
                         <button type="button" class="btn btn-secondary" t-on-click="nextWindow"
-                                t-att-title="nextTitle">
-                            <i class="fa fa-chevron-right"/>
+                                t-att-title="nextTitle" t-att-aria-label="nextTitle">
+                            <i class="fa fa-chevron-right" aria-hidden="true"/>
                         </button>
                     </div>
                     <div class="o_gantt_soft_scale_buttons btn-group" t-if="props.archInfo.scales.length &gt; 1">
@@ -45,12 +45,12 @@
                          calendar unit again. -->
                     <button type="button" class="btn btn-secondary o_gantt_soft_button_fit"
                             title="Frame every record of the search" t-on-click="zoomToFit">
-                        <i class="fa fa-arrows-h me-1"/>Fit
+                        <i class="fa fa-arrows-h me-1" aria-hidden="true"/>Fit
                     </button>
                     <!-- Download the records of the current window. -->
                     <button type="button" class="btn btn-secondary o_gantt_soft_button_csv"
                             title="Download the records of this period as CSV" t-on-click="exportCsv">
-                        <i class="fa fa-download me-1"/>CSV
+                        <i class="fa fa-download me-1" aria-hidden="true"/>CSV
                     </button>
                 </t>
                 <t t-set-slot="layout-actions">

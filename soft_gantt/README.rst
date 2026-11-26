@@ -308,6 +308,10 @@ Behaviour
   write is reported instead of being swallowed. Writes to the same record are
   serialized so a quick second gesture uses the first write's fresh dates, and
   pointer listeners are removed when the view unmounts mid-gesture.
+* **Keyboard and assistive technology.** Bars and group toggles expose button
+  semantics and work with Enter/Space. Alt+Arrow moves a focused bar by one day,
+  Arrow keys resize a focused edge, icon-only controls have accessible names,
+  and decorative icons are hidden from assistive technology.
 * **Theme safe.** Every colour is a ``$o-gantt-soft-*`` SCSS variable. The light
   values live in ``gantt_soft.scss``, the dark ones in ``gantt_soft.dark.scss``,
   which is served through the ``web.assets_web_dark`` bundle when

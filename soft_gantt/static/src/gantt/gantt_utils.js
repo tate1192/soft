@@ -770,6 +770,7 @@ export function buildPopoverButtons(archInfo, record, runAction) {
     return (archInfo.buttons || []).map((button, index) => ({
         key: `${index}:${button.type}:${button.name}`,
         label: button.string,
+        ariaLabel: button.string || button.name,
         icon: button.icon,
         className: button.class,
         onClick: () => runAction(button, record),
