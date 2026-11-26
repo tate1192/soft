@@ -155,6 +155,9 @@
                     No record carries a date yet: set one to see it on the timeline.
                 </div>
             </div>
+            <div class="o_gantt_soft_truncated alert alert-warning py-1 px-2 m-0" t-if="props.isTruncated" role="status">
+                <span t-esc="truncatedLabel"/>
+            </div>
             <div class="o_gantt_soft_footer" t-if="unscheduledCount and !hasNothingScheduled">
                 <span t-esc="unscheduledLabel"/>
             </div>

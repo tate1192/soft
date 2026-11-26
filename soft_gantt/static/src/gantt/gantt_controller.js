@@ -187,6 +187,9 @@ export class GanttSoftController extends Component {
             archInfo: this.props.archInfo,
             fields: this.props.fields,
             records: this.model.records,
+            unscheduledCount: this.model.unscheduledCount,
+            isTruncated: this.model.isTruncated,
+            recordLimit: this.props.archInfo.limit,
             scale: this.state.scale,
             window: this.window,
             canEdit: this.canEdit,
@@ -383,7 +386,16 @@ export class GanttSoftController extends Component {
             this.state.range,
             this.window.start,
             this.window.end
-        )}`.replace(/[^\w-]+/g, "_");
+        )}${this.model.isTruncated ? "_partial" : ""}`.replace(/[^\w-]+/g, "_");
+        if (this.model.isTruncated) {
+            this.notification.add(
+                _t(
+                    "CSV contains only the first %s records of this window.",
+                    this.props.archInfo.limit
+                ),
+                { type: "warning" }
+            );
+        }
         downloadTextFile(`${name}.csv`, buildCsv(header, rows));
     }
 
