@@ -1,5 +1,4 @@
 import { Domain } from "@web/core/domain";
-import { KeepLast } from "@web/core/utils/concurrency";
 import { Model } from "@web/model/model";
 import { getFieldsSpec } from "@web/model/relational_model/utils";
 import { orderByToString } from "@web/search/utils/order_by";
@@ -19,7 +18,7 @@ import { serializeOdooDate } from "./gantt_utils";
  */
 export class GanttSoftModel extends Model {
     setup(params) {
-        this.keepLast = new KeepLast();
+        this.loadId = 0;
         this.resModel = params.resModel;
         this.fields = params.fields;
         this.activeFields = params.activeFields;
@@ -60,14 +59,12 @@ export class GanttSoftModel extends Model {
             config.orderBy = params.orderBy || [];
         }
         this.config = config;
-        this.records = await this.keepLast.add(this._fetch(config));
-        this.notify();
+        await this._load(config);
     }
 
     /** Re-read the records with the parameters already in use. */
     async reload() {
-        this.records = await this.keepLast.add(this._fetch(this.config));
-        this.notify();
+        await this._load(this.config);
     }
 
     /**
@@ -77,8 +74,24 @@ export class GanttSoftModel extends Model {
      */
     async setWindow(window) {
         this.config.window = window;
-        this.records = await this.keepLast.add(this._fetch(this.config));
-        this.notify();
+        await this._load(this.config);
+    }
+
+    /**
+     * Fetch records while only letting the newest request update the model.
+     *
+     * `KeepLast` deliberately leaves superseded promises pending. Returning that
+     * promise from `load` therefore leaves callers such as a write-then-reload
+     * flow waiting forever when a newer load starts. A request id gives every
+     * caller a settling promise while still ignoring stale results.
+     */
+    async _load(config) {
+        const loadId = ++this.loadId;
+        const records = await this._fetch(config);
+        if (loadId === this.loadId) {
+            this.records = records;
+            this.notify();
+        }
     }
 
     /**

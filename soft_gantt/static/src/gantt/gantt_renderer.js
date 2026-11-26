@@ -454,7 +454,7 @@ export class GanttSoftRenderer extends Component {
         }
         // One level is the one field case of the same recursion: the last level
         // holds the records (the bars), every other level is a row of its own.
-        return this._buildGroupRows(bars, range, groupByFields, 0, "", []);
+        return this._buildGroupRows(bars, range, groupByFields, 0, [], []);
     }
 
     /** The levels the rows are grouped on, from the outer one to the inner one. */
@@ -473,19 +473,20 @@ export class GanttSoftRenderer extends Component {
      *
      * Each level splits the records of its parent group by the value of its
      * field. The inner level holds the bars; the outer levels are header rows
-     * that fold their whole subtree into one bar when collapsed. Keys are the
-     * path of values ("7|cleaning"), so a value that appears under two parents
-     * is two rows and folding one does not fold the other.
+     * that fold their whole subtree into one bar when collapsed. A nested key
+     * encodes the field and value of every level, so an empty parent, a value
+     * containing the old `|` delimiter, and a parent with the same label cannot
+     * collide.
      *
      * @param {Array} bars records to group, already drawn
      * @param {Object} range the window
      * @param {string[]} groupByFields all levels
      * @param {number} depth the level being built
-     * @param {string} parentKey the key path of the parent group, "" at the top
+     * @param {Array} parentPath encoded `[field, value]` pairs of the parent group
      * @param {Array} parentValues the group values of the parent path
      * @returns {Array} rows in display order (headers followed by their subtree)
      */
-    _buildGroupRows(bars, range, groupByFields, depth, parentKey, parentValues) {
+    _buildGroupRows(bars, range, groupByFields, depth, parentPath, parentValues) {
         const fieldName = groupByFields[depth];
         const isLeaf = depth === groupByFields.length - 1;
         const groups = new Map();
@@ -504,11 +505,18 @@ export class GanttSoftRenderer extends Component {
             groups.get(valueKey).bars.push(bar);
         }
         const rows = [];
-        const sorted = [...groups.values()].sort((a, b) =>
-            a.label.localeCompare(b.label, undefined, { numeric: true })
+        const sorted = [...groups.values()].sort(
+            (a, b) =>
+                a.label.localeCompare(b.label, undefined, { numeric: true }) ||
+                a.valueKey.localeCompare(b.valueKey, undefined, { numeric: true })
         );
         for (const { valueKey, label, bars: groupBars } of sorted) {
-            const nodeKey = parentKey ? `${parentKey}|${valueKey}` : String(valueKey);
+            const path = [...parentPath, [fieldName, valueKey]];
+            // Keep the long-standing single-level keys stable. Nested paths need
+            // structure: joining raw values made an empty parent and a parent
+            // literally named "a" produce the same child key.
+            const nodeKey =
+                groupByFields.length === 1 ? String(valueKey) : JSON.stringify(path);
             // The row counts its records (of the whole subtree) and, when the
             // view asks for it, sums a numeric field over them: the summary
             // that makes a folded or expanded group readable at a glance.
@@ -551,7 +559,7 @@ export class GanttSoftRenderer extends Component {
                         range,
                         groupByFields,
                         depth + 1,
-                        nodeKey,
+                        path,
                         groupValues
                     )
                 );
@@ -1195,9 +1203,14 @@ export class GanttSoftRenderer extends Component {
         const baseWidth = parseFloat(barEl.style.width) || 0;
         const originalLeft = barEl.style.left;
         const originalWidth = barEl.style.width;
-        // Shifting the start can only eat the width down to one column, and
-        // the same for the end: the bar keeps at least one day.
-        const maxShift = Math.max(0, Math.floor(baseWidth / dayPercent - 1));
+        // Clamp against the record's real interval, not the clipped geometry:
+        // a year-long record shown in a month may still be shortened by more
+        // than the visible month. The painted interval keeps at least one day.
+        const recordDays = Math.max(
+            1,
+            Math.round((row.laneStop - row.laneStart) / DAY_MS)
+        );
+        const maxShift = Math.max(0, recordDays - 1);
         const daysFrom = (clientX) => {
             const raw = this._dayDelta(startX, clientX, rowWidth);
             return edge === "start" ? Math.min(raw, maxShift) : Math.max(raw, -maxShift);

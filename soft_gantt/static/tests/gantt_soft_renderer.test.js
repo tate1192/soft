@@ -691,6 +691,28 @@ describe("GanttSoftRenderer", () => {
         expect(resized).toEqual([[1, "end", 2]]);
     });
 
+    test("a clipped bar can be resized against its real duration", async () => {
+        const resized = [];
+        await mountRenderer({
+            scale: "month",
+            window: windowRange(Date.parse("2026-03-15T00:00:00Z"), "month"),
+            records: [makeRecord(1, "2026-01-01 00:00:00", "2027-01-01 00:00:00")],
+            onResize: (id, edge, days) => resized.push([id, edge, days]),
+        });
+
+        // The bar fills the visible month, but the record spans a whole year.
+        // Moving 90 days left must not be clamped to the visible 30 days.
+        queryFirst(".o_gantt_soft_row").style.width = "310px";
+        const handle = queryFirst(".o_gantt_soft_bar_handle_end");
+        handle.dispatchEvent(
+            new PointerEvent("pointerdown", { clientX: 0, button: 0, bubbles: true })
+        );
+        window.dispatchEvent(new PointerEvent("pointermove", { clientX: -900, bubbles: true }));
+        window.dispatchEvent(new PointerEvent("pointerup", { clientX: -900, bubbles: true }));
+
+        expect(resized).toEqual([[1, "end", -90]]);
+    });
+
     test("dragging the start edge moves the start, not the end", async () => {
         const resized = [];
         await mountRenderer({
@@ -1380,6 +1402,7 @@ describe("dependencies", () => {
             groupByField: "team_id",
             groupByFields: ["team_id", "service_type_id"],
         });
+    const multiKey = (...pairs) => JSON.stringify(pairs);
     const MULTI_RECORDS = () => [
         makeRecord(1, "2026-03-02 00:00:00", "2026-03-03 00:00:00", {
             team_id: TEAMS.alpha,
@@ -1423,12 +1446,40 @@ describe("dependencies", () => {
         expect(queryAll(".o_gantt_soft_label_child").length).toBe(3);
     });
 
+    test("nested group keys stay unique for empty parents and delimiter values", async () => {
+        const toggled = [];
+        await mountRenderer({
+            archInfo: makeArchInfo({
+                groupByField: "team",
+                groupByFields: ["team", "kind"],
+            }),
+            records: [
+                makeRecord(1, "2026-03-02 00:00:00", "2026-03-03 00:00:00", {
+                    team: "",
+                    kind: "a",
+                }),
+                makeRecord(2, "2026-03-04 00:00:00", "2026-03-05 00:00:00", {
+                    team: "a",
+                    kind: "b",
+                }),
+            ],
+            onToggleGroup: (key) => toggled.push(key),
+        });
+
+        for (const toggle of queryAll(".o_gantt_soft_group_toggle")) {
+            toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        }
+
+        expect(toggled).toHaveLength(4);
+        expect(new Set(toggled).size).toBe(4);
+    });
+
     test("folding the outer level folds its whole subtree", async () => {
         const records = MULTI_RECORDS();
         await mountRenderer({
             archInfo: MULTI_ARCH(),
             records,
-            collapsed: { 7: true },
+            collapsed: { [multiKey(["team_id", "7"])]: true },
         });
 
         // Alpha is one folded bar, Beta keeps its header and its group row.
@@ -1449,7 +1500,7 @@ describe("dependencies", () => {
         await mountRenderer({
             archInfo: MULTI_ARCH(),
             records,
-            collapsed: { "7|1": true },
+            collapsed: { [multiKey(["team_id", "7"], ["service_type_id", "1"])]: true },
         });
 
         expect(queryAll(".o_gantt_soft_label").map((el) => el.textContent)).toEqual([
@@ -1481,7 +1532,7 @@ describe("dependencies", () => {
             archInfo: MULTI_ARCH(),
             records: MULTI_RECORDS(),
             defaultCollapsed: true,
-            collapsed: { 7: false },
+            collapsed: { [multiKey(["team_id", "7"])]: false },
         });
 
         // Alpha is open (its two groups stay open), Beta is folded.
@@ -1546,7 +1597,7 @@ describe("dependencies", () => {
             archInfo: MULTI_ARCH(),
             records,
             // Beta's "Cleaning" group only.
-            collapsed: { "8|1": true },
+            collapsed: { [multiKey(["team_id", "8"], ["service_type_id", "1"])]: true },
         });
 
         // Alpha/Cleaning keeps its two bars, Beta/Cleaning folds into one.

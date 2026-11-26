@@ -96,6 +96,26 @@ describe("buildTimeline", () => {
         expect(cells.length).toBe(31);
     });
 
+    test("coarsens long fitted windows through quarters and years", () => {
+        const elevenYears = buildTimeline(
+            "year",
+            Date.UTC(2015, 0, 1),
+            Date.UTC(2026, 0, 1)
+        );
+        expect(elevenYears.unit).toBe("quarter");
+        expect(elevenYears.cells.length).toBe(44);
+        expect(elevenYears.cells.at(-1).end).toBe(Date.UTC(2026, 0, 1));
+
+        const fiftyYears = buildTimeline(
+            "year",
+            Date.UTC(1976, 0, 1),
+            Date.UTC(2026, 0, 1)
+        );
+        expect(fiftyYears.unit).toBe("year");
+        expect(fiftyYears.cells).toHaveLength(50);
+        expect(fiftyYears.cells.at(-1).end).toBe(Date.UTC(2026, 0, 1));
+    });
+
     test("the bands are never drawn at the unit of the cells", () => {
         for (const scale of ["day", "week", "month", "quarter", "year"]) {
             const { unit, bandUnit } = buildTimeline(
