@@ -113,6 +113,9 @@ async function mountRenderer({
     onResize = () => {},
     onToggleGroup = () => {},
     onCreateAt = () => {},
+    unscheduledCount = undefined,
+    isTruncated = false,
+    recordLimit = undefined,
 }) {
     const target = document.createElement("div");
     // The fixture is where the assertions look: it is the root node hoot
@@ -138,6 +141,9 @@ async function mountRenderer({
             onResize,
             onToggleGroup,
             onCreateAt,
+            unscheduledCount,
+            isTruncated,
+            recordLimit,
         },
         // Odoo keeps its templates (static XML files, view extensions) in its
         // own registry, and hands them to Owl through this hook: `env.js`
@@ -221,6 +227,31 @@ describe("GanttSoftRenderer", () => {
             "No record carries a date yet: set one to see it on the timeline."
         );
         // The footer would repeat the same count under the explanation.
+        expect(".o_gantt_soft_footer").toHaveCount(0);
+    });
+
+    test("reports undated records counted outside the visible window", async () => {
+        await mountRenderer({
+            records: [makeRecord(1, "2026-03-02 00:00:00", "2026-03-03 00:00:00")],
+            window: windowRange(Date.parse("2026-03-15T00:00:00Z"), "month"),
+            unscheduledCount: 7,
+        });
+
+        expect(".o_gantt_soft_bar").toHaveCount(1);
+        expect(".o_gantt_soft_footer").toHaveText("7 record(s) without a date");
+    });
+
+    test("explains an empty window when only undated records exist", async () => {
+        await mountRenderer({
+            records: [],
+            window: windowRange(Date.parse("2026-03-15T00:00:00Z"), "month"),
+            unscheduledCount: 3,
+        });
+
+        expect(".o_gantt_soft_grid").toHaveCount(0);
+        expect(".o_gantt_soft_placeholder").toHaveText(
+            "No record carries a date yet: set one to see it on the timeline."
+        );
         expect(".o_gantt_soft_footer").toHaveCount(0);
     });
 

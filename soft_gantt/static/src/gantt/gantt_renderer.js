@@ -91,6 +91,9 @@ export class GanttSoftRenderer extends Component {
         defaultCollapsed: { type: Boolean, optional: true },
         canCellCreate: { type: Boolean, optional: true },
         onCreateAt: { type: Function, optional: true },
+        unscheduledCount: { type: Number, optional: true },
+        isTruncated: { type: Boolean, optional: true },
+        recordLimit: { type: Number, optional: true },
     };
 
     setup() {
@@ -219,12 +222,22 @@ export class GanttSoftRenderer extends Component {
     }
 
     get unscheduledCount() {
+        if (Number.isFinite(this.props.unscheduledCount)) {
+            return this.props.unscheduledCount;
+        }
         // Records, not rows: with `group_by` a row stands for several records.
         return this.props.records.length - this.scheduledRows.length;
     }
 
     get unscheduledLabel() {
         return _t("%s record(s) without a date", this.unscheduledCount);
+    }
+
+    get truncatedLabel() {
+        return _t(
+            "Only the first %s records of this window are shown; narrow the period to see the rest.",
+            this.props.recordLimit
+        );
     }
 
     // ------------------------------------------------------------------
@@ -1028,11 +1041,11 @@ export class GanttSoftRenderer extends Component {
     }
 
     get isEmpty() {
-        return this.props.records.length === 0;
+        return this.props.records.length === 0 && !this.unscheduledCount;
     }
 
     get hasNothingScheduled() {
-        return !this.isEmpty && !this.range;
+        return !this.isEmpty && this.scheduledRows.length === 0;
     }
 
     // ------------------------------------------------------------------

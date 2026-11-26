@@ -329,6 +329,29 @@ test("create is not offered when the arch forbids it", async () => {
     expect(created).toEqual([]);
 });
 
+test("warns when the visible window reaches its record limit", async () => {
+    await mountGanttView({
+        type: "gantt_soft",
+        resModel: "project.task",
+        state: { ...MARCH_STATE },
+        arch: `
+            <gantt_soft
+                date_start="date_start"
+                date_stop="date_deadline"
+                limit="1"
+                mode="month"
+                scales="day,week,month"
+            />
+        `,
+    });
+    await animationFrame();
+
+    expect(".o_gantt_soft_bar").toHaveCount(1);
+    expect(".o_gantt_soft_truncated").toHaveText(
+        "Only the first 1 records of this window are shown; narrow the period to see the rest."
+    );
+});
+
 test("the fit button frames the whole search", async () => {
     await mountGanttView({
         type: "gantt_soft",
@@ -371,6 +394,39 @@ test("the CSV button downloads the records of the window", async () => {
     expect(lines).toHaveLength(4);
     // One row per painted record, each with its own label in the first column.
     expect(lines.slice(1).every((line) => line.split(";")[0].length > 0)).toBe(true);
+});
+
+test("a truncated window marks its CSV export as partial", async () => {
+    const filenames = [];
+    const originalClick = HTMLAnchorElement.prototype.click;
+    const originalCreateObjectURL = URL.createObjectURL;
+    HTMLAnchorElement.prototype.click = function () {
+        filenames.push(this.download);
+    };
+    URL.createObjectURL = () => "blob:soft-gantt-partial-test";
+    after(() => {
+        HTMLAnchorElement.prototype.click = originalClick;
+        URL.createObjectURL = originalCreateObjectURL;
+    });
+    await mountGanttView({
+        type: "gantt_soft",
+        resModel: "project.task",
+        state: { ...MARCH_STATE },
+        arch: `
+            <gantt_soft
+                date_start="date_start"
+                date_stop="date_deadline"
+                limit="1"
+                mode="month"
+                scales="day,week,month"
+            />
+        `,
+    });
+
+    await click(queryOne(".o_gantt_soft_button_csv"));
+
+    expect(filenames).toHaveLength(1);
+    expect(filenames[0]).toInclude("_partial.csv");
 });
 
 test("a day window is labelled as a day", async () => {

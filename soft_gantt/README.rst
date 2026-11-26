@@ -203,7 +203,8 @@ Behaviour
   history: a hundred thousand operations cost the same one month of reading as
   a hundred, and paging is a click instead of a scrollbar. ``limit`` stays as a
   safety net for a window that is genuinely crowded; if a window holds more
-  records than that, only the first ones are drawn.
+  records than that, only the first ones are drawn and the view warns that the
+  window is truncated.
 * **A scale is a zoom, and the header has two levels.** The control panel
   buttons zoom in and out: ``Day`` shows the *hours* of one day, ``Week`` the
   days of one week, ``Month`` the days of one month, ``Quarter`` the weeks of a
@@ -317,9 +318,9 @@ Known limitations
 
 * ``delete`` and ``duplicate`` are accepted in the arch for compatibility but
   have no effect: the view has no record selection.
-* ``limit`` truncates a window silently. A window holding more records than the
-  limit draws the first ones only; narrow the window (a smaller scale or range)
-  to see the rest.
+* ``limit`` truncates a crowded window to its first records. The view warns when
+  this happens, and a CSV exported from that window is marked ``partial``; narrow
+  the window (a smaller scale or range) to see the rest.
 * ``date_stop`` is a half-open end: a record ending exactly on a day boundary
   covers the days before it, not the boundary day itself.
 * A dependency arrow is drawn only between two bars the viewport paints: a folded
