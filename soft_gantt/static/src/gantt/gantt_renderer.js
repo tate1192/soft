@@ -1,4 +1,4 @@
-import { Component, onMounted, onWillRender, useRef } from "@odoo/owl";
+import { Component, onMounted, onWillRender, onWillUnmount, useRef } from "@odoo/owl";
 import { formatDate } from "@web/core/l10n/dates";
 import { _t } from "@web/core/l10n/translation";
 import { evaluateBooleanExpr } from "@web/core/py_js/py";
@@ -100,6 +100,12 @@ export class GanttSoftRenderer extends Component {
         // Set while a drag is being committed, so the click that the browser
         // fires right after the gesture does not open the record as well.
         this.suppressClick = false;
+        this.pointerCleanups = new Set();
+        onWillUnmount(() => {
+            for (const cleanup of [...this.pointerCleanups]) {
+                cleanup();
+            }
+        });
 
         this.viewportRef = useRef("viewport");
         // The dependency arrows are drawn in pixels over the timeline, so the
@@ -1164,9 +1170,14 @@ export class GanttSoftRenderer extends Component {
         const onPointerMove = (moveEv) => {
             barEl.style.transform = `translateX(${moveEv.clientX - startX}px)`;
         };
-        const onPointerUp = (upEv) => {
+        const cleanup = () => {
             removeListeners();
             barEl.style.transform = "";
+            this.pointerCleanups.delete(cleanup);
+        };
+        this.pointerCleanups.add(cleanup);
+        const onPointerUp = (upEv) => {
+            cleanup();
             const days = daysFrom(upEv.clientX);
             if (days !== 0) {
                 this.suppressClick = true;
@@ -1174,8 +1185,7 @@ export class GanttSoftRenderer extends Component {
             }
         };
         const onPointerCancel = () => {
-            removeListeners();
-            barEl.style.transform = "";
+            cleanup();
         };
         window.addEventListener("pointermove", onPointerMove);
         window.addEventListener("pointerup", onPointerUp);
@@ -1247,9 +1257,14 @@ export class GanttSoftRenderer extends Component {
             window.removeEventListener("pointerup", onPointerUp);
             window.removeEventListener("pointercancel", onPointerCancel);
         };
-        const onPointerUp = (upEv) => {
+        const cleanup = () => {
             removeListeners();
             restore();
+            this.pointerCleanups.delete(cleanup);
+        };
+        this.pointerCleanups.add(cleanup);
+        const onPointerUp = (upEv) => {
+            cleanup();
             const days = daysFrom(upEv.clientX);
             if (days !== 0) {
                 // The click the browser fires after the gesture must not open
@@ -1261,8 +1276,7 @@ export class GanttSoftRenderer extends Component {
             }
         };
         const onPointerCancel = () => {
-            removeListeners();
-            restore();
+            cleanup();
         };
         window.addEventListener("pointermove", onPointerMove);
         window.addEventListener("pointerup", onPointerUp);
