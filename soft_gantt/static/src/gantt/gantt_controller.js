@@ -82,6 +82,7 @@ export class GanttSoftController extends Component {
         this.notification = useService("notification");
         this.actionService = useService("action");
         this.dialogService = useService("dialog");
+        this.writeQueues = new Map();
         // The card is anchored on the bar it belongs to, and escapes the view
         // when a click would otherwise take the reader to another screen. Its
         // own container class is what lets the stylesheet theme the card (and
@@ -570,6 +571,38 @@ export class GanttSoftController extends Component {
     }
 
     /**
+     * Serialize writes per record and re-read the record after each write.
+     *
+     * Two quick gestures on the same bar used to read the same stale dates and
+     * race their transactions. The second action now waits for the first reload
+     * and computes its values from the updated record. Different records remain
+     * independent.
+     */
+    _queueRecordWrite(recordId, action) {
+        const previous = this.writeQueues.get(recordId) || Promise.resolve();
+        const task = previous.catch(() => {}).then(async () => {
+            try {
+                await action();
+            } catch (error) {
+                this.notification.add(error.message || error.toString(), { type: "danger" });
+            }
+            try {
+                await this.model.reload();
+            } catch (error) {
+                this.notification.add(error.message || error.toString(), { type: "danger" });
+            }
+        });
+        this.writeQueues.set(recordId, task);
+        const cleanup = () => {
+            if (this.writeQueues.get(recordId) === task) {
+                this.writeQueues.delete(recordId);
+            }
+        };
+        task.then(cleanup, cleanup);
+        return task;
+    }
+
+    /**
      * Move a record by a whole number of days.
      *
      * Both dates are shifted together so the duration is preserved. Each value
@@ -577,37 +610,34 @@ export class GanttSoftController extends Component {
      * instant, a date stays the user's calendar day. A date the record does
      * not carry is left untouched.
      */
-    async onReschedule(recordId, days) {
-        const archInfo = this.props.archInfo;
-        const record = this.model.records.find((rec) => rec.id === recordId);
-        if (!record) {
-            return;
-        }
-        const values = {};
-        for (const [fieldName, fieldType] of [
-            [archInfo.dateStart, archInfo.dateStartType],
-            [archInfo.dateStop, archInfo.dateStopType],
-        ]) {
-            const timestamp = parseOdooFieldDate(record[fieldName], fieldType);
-            if (timestamp === null) {
-                continue;
+    onReschedule(recordId, days) {
+        return this._queueRecordWrite(recordId, async () => {
+            const archInfo = this.props.archInfo;
+            const record = this.model.records.find((rec) => rec.id === recordId);
+            if (!record) {
+                return;
             }
-            values[fieldName] = serializeOdooDate(
-                addFieldDays(timestamp, days, fieldType),
-                fieldType
-            );
-        }
-        if (!Object.keys(values).length) {
-            return;
-        }
-        try {
+            const values = {};
+            for (const [fieldName, fieldType] of [
+                [archInfo.dateStart, archInfo.dateStartType],
+                [archInfo.dateStop, archInfo.dateStopType],
+            ]) {
+                const timestamp = parseOdooFieldDate(record[fieldName], fieldType);
+                if (timestamp === null) {
+                    continue;
+                }
+                values[fieldName] = serializeOdooDate(
+                    addFieldDays(timestamp, days, fieldType),
+                    fieldType
+                );
+            }
+            if (!Object.keys(values).length) {
+                return;
+            }
             await this.orm.write(this.props.resModel, [recordId], values, {
                 context: this.model.context,
             });
-        } catch (error) {
-            this.notification.add(error.message || error.toString(), { type: "danger" });
-        }
-        await this.model.reload();
+        });
     }
 
     /**
@@ -625,42 +655,39 @@ export class GanttSoftController extends Component {
      * @param {string} edge `start` or `end`
      * @param {number} days signed, whole days
      */
-    async onResize(recordId, edge, days) {
+    onResize(recordId, edge, days) {
         if (!days) {
-            return;
+            return Promise.resolve();
         }
-        const archInfo = this.props.archInfo;
-        const record = this.model.records.find((rec) => rec.id === recordId);
-        if (!record) {
-            return;
-        }
-        const isStart = edge === "start";
-        const fieldName = isStart ? archInfo.dateStart : archInfo.dateStop;
-        const fieldType = isStart ? archInfo.dateStartType : archInfo.dateStopType;
-        const anchorName = isStart ? archInfo.dateStop : archInfo.dateStart;
-        const anchorType = isStart ? archInfo.dateStopType : archInfo.dateStartType;
-        const timestamp = parseOdooFieldDate(record[fieldName], fieldType);
-        if (timestamp === null) {
-            return;
-        }
-        const anchor = parseOdooFieldDate(record[anchorName], anchorType);
-        const value = clampResize(
-            addFieldDays(timestamp, days, fieldType),
-            anchor,
-            isStart,
-            anchorType
-        );
-        try {
+        return this._queueRecordWrite(recordId, async () => {
+            const archInfo = this.props.archInfo;
+            const record = this.model.records.find((rec) => rec.id === recordId);
+            if (!record) {
+                return;
+            }
+            const isStart = edge === "start";
+            const fieldName = isStart ? archInfo.dateStart : archInfo.dateStop;
+            const fieldType = isStart ? archInfo.dateStartType : archInfo.dateStopType;
+            const anchorName = isStart ? archInfo.dateStop : archInfo.dateStart;
+            const anchorType = isStart ? archInfo.dateStopType : archInfo.dateStartType;
+            const timestamp = parseOdooFieldDate(record[fieldName], fieldType);
+            if (timestamp === null) {
+                return;
+            }
+            const anchor = parseOdooFieldDate(record[anchorName], anchorType);
+            const value = clampResize(
+                addFieldDays(timestamp, days, fieldType),
+                anchor,
+                isStart,
+                anchorType
+            );
             await this.orm.write(
                 this.props.resModel,
                 [recordId],
                 { [fieldName]: serializeOdooDate(value, fieldType) },
                 { context: this.model.context }
             );
-        } catch (error) {
-            this.notification.add(error.message || error.toString(), { type: "danger" });
-        }
-        await this.model.reload();
+        });
     }
 
     /**

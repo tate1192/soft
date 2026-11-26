@@ -305,7 +305,9 @@ Behaviour
   *CSV*, which downloads the records of the window with the two dates, the
   duration and the fields the arch declares.
 * **No surprises.** Bars are only draggable when the user may edit, and a failed
-  write is reported instead of being swallowed.
+  write is reported instead of being swallowed. Writes to the same record are
+  serialized so a quick second gesture uses the first write's fresh dates, and
+  pointer listeners are removed when the view unmounts mid-gesture.
 * **Theme safe.** Every colour is a ``$o-gantt-soft-*`` SCSS variable. The light
   values live in ``gantt_soft.scss``, the dark ones in ``gantt_soft.dark.scss``,
   which is served through the ``web.assets_web_dark`` bundle when

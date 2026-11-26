@@ -152,11 +152,19 @@ async function mountRenderer({
         test: true,
     });
     app.mount(target);
+    let destroyed = false;
+    const destroy = () => {
+        if (!destroyed) {
+            app.destroy();
+            destroyed = true;
+        }
+    };
     after(() => {
-        app.destroy();
+        destroy();
         target.remove();
     });
     await animationFrame();
+    return { app, destroy };
 }
 
 /** Click through the DOM: the bars have no size in a bare mount. */
@@ -338,6 +346,25 @@ describe("GanttSoftRenderer", () => {
         window.dispatchEvent(new PointerEvent("pointerup", { clientX: 75, bubbles: true }));
 
         expect(rescheduled).toEqual([[1, 1]]);
+    });
+
+    test("unmounting during a drag removes its global pointer listeners", async () => {
+        const rescheduled = [];
+        const { destroy } = await mountRenderer({
+            records: [makeRecord(1, "2026-03-02 00:00:00", "2026-03-05 00:00:00")],
+            onReschedule: (id, days) => rescheduled.push([id, days]),
+        });
+
+        queryFirst(".o_gantt_soft_row").style.width = "300px";
+        queryFirst(".o_gantt_soft_bar").dispatchEvent(
+            new PointerEvent("pointerdown", { clientX: 0, button: 0, bubbles: true })
+        );
+        window.dispatchEvent(new PointerEvent("pointermove", { clientX: 75, bubbles: true }));
+        destroy();
+        window.dispatchEvent(new PointerEvent("pointerup", { clientX: 75, bubbles: true }));
+        await animationFrame();
+
+        expect(rescheduled).toEqual([]);
     });
 
     test("the click that follows a drag does not open the record", async () => {
@@ -758,6 +785,25 @@ describe("GanttSoftRenderer", () => {
         window.dispatchEvent(new PointerEvent("pointerup", { clientX: 75, bubbles: true }));
 
         expect(resized).toEqual([[1, "start", 1]]);
+    });
+
+    test("unmounting during a resize removes its global pointer listeners", async () => {
+        const resized = [];
+        const { destroy } = await mountRenderer({
+            records: [makeRecord(1, "2026-03-02 00:00:00", "2026-03-05 00:00:00")],
+            onResize: (id, edge, days) => resized.push([id, edge, days]),
+        });
+
+        queryFirst(".o_gantt_soft_row").style.width = "300px";
+        queryFirst(".o_gantt_soft_bar_handle_end").dispatchEvent(
+            new PointerEvent("pointerdown", { clientX: 0, button: 0, bubbles: true })
+        );
+        window.dispatchEvent(new PointerEvent("pointermove", { clientX: 75, bubbles: true }));
+        destroy();
+        window.dispatchEvent(new PointerEvent("pointerup", { clientX: 75, bubbles: true }));
+        await animationFrame();
+
+        expect(resized).toEqual([]);
     });
 
     test("a read only view shows no resize handles and cannot resize", async () => {
