@@ -298,6 +298,12 @@ $o-gantt-soft-popover-close-filter: none !default;
     &.o_gantt_soft_group_toggle_collapsed::before {
         content: "▶";
     }
+
+    &:focus-visible {
+        border-radius: 2px;
+        outline: 2px solid $o-gantt-soft-accent;
+        outline-offset: 1px;
+    }
 }
 
 // Avatar of a group row: the image field the view names, shown next to the
@@ -466,6 +472,11 @@ $o-gantt-soft-popover-close-filter: none !default;
     user-select: none;
 }
 
+.o_gantt_soft_bar_activation {
+    position: absolute;
+    inset: 0;
+}
+
 // A folded group stands for several records: clicking it unfolds the group
 // instead of opening one record, so it reads as an action, not as a handle.
 .o_gantt_soft_bar_collapsed {
@@ -480,6 +491,11 @@ $o-gantt-soft-popover-close-filter: none !default;
     border: 0;
     background: none;
     box-shadow: none;
+
+    .o_gantt_soft_bar_activation {
+        left: -7px;
+        width: 14px;
+    }
 
     &::before {
         content: "";
@@ -577,6 +593,12 @@ $o-gantt-soft-popover-close-filter: none !default;
 .o_gantt_soft_bar:hover .o_gantt_soft_bar_handle,
 .o_gantt_soft_bar:focus-within .o_gantt_soft_bar_handle {
     opacity: 1;
+}
+
+.o_gantt_soft_bar:focus-within,
+.o_gantt_soft_bar_handle:focus-visible {
+    outline: 2px solid $o-gantt-soft-accent;
+    outline-offset: -2px;
 }
 
 .o_gantt_soft_bar_progress {
