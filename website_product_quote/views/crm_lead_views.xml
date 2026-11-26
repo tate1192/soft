@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+	 <!-- Backend için Fırsat Görünümü -->
+    <template id="crm_lead_quote_view" inherit_id="crm.crm_lead_view_form">
+        <xpath expr="//field[@name='partner_id']" position="after">
+            <field name="product_id"/>
+            <field name="requested_quantity"/>
+            <field name="requested_price"/>
+            <field name="customer_description"/>
+        </xpath>
+    </template>
+    
+</odoo>
