@@ -44,7 +44,8 @@ export function dateTimeInUserZone(timestamp) {
 
 /**
  * Above this many cells a timeline stops being readable, so the finest unit is
- * coarsened one step (hours -> days -> weeks -> months) before drawing it.
+ * coarsened one step (hours -> days -> weeks -> months -> quarters -> years)
+ * before drawing it.
  */
 const MAX_COLUMNS = 120;
 
@@ -365,7 +366,7 @@ function buildUnitBands(cells, unit) {
 export function buildTimeline(scale, rangeStart, rangeEnd) {
     let unit = SCALE_UNITS[scale] || "day";
     let cells = buildUnitCells(unit, rangeStart, rangeEnd);
-    while (cells.length > MAX_COLUMNS && unit !== "month") {
+    while (cells.length > MAX_COLUMNS && unit !== "year") {
         unit = UNIT_STEPS[UNIT_STEPS.indexOf(unit) + 1];
         cells = buildUnitCells(unit, rangeStart, rangeEnd);
     }

@@ -7,6 +7,7 @@ import {
     fields,
     models,
     mountWithCleanup,
+    mockService,
     parseViewProps,
 } from "@web/../tests/web_test_helpers";
 import { View } from "@web/views/view";
@@ -166,6 +167,16 @@ class GroupedTask extends models.Model {
                 scales="day,week,month"
             />
         `,
+        form: `
+            <form>
+                <field name="name"/>
+            </form>
+        `,
+        "form,42": `
+            <form>
+                <field name="name"/>
+            </form>
+        `,
         search: `
             <search>
                 <field name="name"/>
@@ -267,6 +278,42 @@ test("the create button follows the arch", async () => {
     expect(".o_gantt_soft_button_add").toHaveCount(1);
     await click(queryOne(".o_gantt_soft_button_add"));
     expect(created).toEqual([true]);
+});
+
+test("grid create opens the form view offered by the action", async () => {
+    const actions = [];
+    mockService("action", {
+        doAction: async (action) => actions.push(action),
+    });
+    await mountGanttView({
+        type: "gantt_soft",
+        resModel: "grouped.task",
+        views: [
+            [42, "form"],
+            [false, "gantt_soft"],
+        ],
+        selectRecord: () => {},
+        arch: `
+            <gantt_soft
+                date_start="date_start"
+                date_stop="date_deadline"
+                group_by="team"
+                cell_create="1"
+                mode="month"
+                scales="day,week,month"
+            />
+        `,
+        state: { ...MARCH_STATE },
+    });
+
+    queryFirst(".o_gantt_soft_group_add").dispatchEvent(
+        new MouseEvent("click", { bubbles: true })
+    );
+    await animationFrame();
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0].views).toEqual([[42, "form"]]);
+    expect(actions[0].context.default_team).toBe("Alpha");
 });
 
 test("create is not offered when the arch forbids it", async () => {

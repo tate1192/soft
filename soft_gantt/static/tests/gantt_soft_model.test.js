@@ -145,6 +145,39 @@ describe("GanttSoftModel", () => {
         expect(model.records).toHaveLength(2);
     });
 
+    test("superseded loads settle without overwriting the newest records", async () => {
+        let resolveFirst;
+        let resolveSecond;
+        const firstFetch = new Promise((resolve) => {
+            resolveFirst = resolve;
+        });
+        const secondFetch = new Promise((resolve) => {
+            resolveSecond = resolve;
+        });
+        let callCount = 0;
+        const { model } = makeModel({
+            orm: {
+                webSearchRead: async () => {
+                    callCount += 1;
+                    const records = callCount === 1 ? await firstFetch : await secondFetch;
+                    return { records };
+                },
+            },
+        });
+
+        const firstLoad = model.load({ domain: [["id", "=", 1]] });
+        const secondLoad = model.load({ domain: [["id", "=", 2]] });
+        resolveSecond([{ id: 2 }]);
+        await secondLoad;
+        expect(model.records).toEqual([{ id: 2 }]);
+        expect(model.loadId).toBe(2);
+        resolveFirst([{ id: 1 }]);
+        await firstLoad;
+
+        expect(model.loadId).toBe(2);
+        expect(model.records).toEqual([{ id: 2 }]);
+    });
+
     test("the arch default order is used until the search bar has one", async () => {
         const { model } = makeModel();
         expect(model.orderBy).toEqual([{ name: "date_start", asc: true }]);
