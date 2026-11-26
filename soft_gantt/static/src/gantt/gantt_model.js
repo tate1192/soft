@@ -9,9 +9,9 @@ import { serializeOdooDate } from "./gantt_utils";
  * Data source of the Gantt view.
  *
  * A Gantt shows every record at once: there is no paging and no grouping, so
- * the full `RelationalModel` machinery would be wasted here. This model does
- * one thing: turn the current search parameters (domain, context, order) into
- * a single `web_search_read` and keep the resulting records.
+ * the full `RelationalModel` machinery would be wasted here. This model turns
+ * the current search parameters into one `web_search_read`, plus a count of
+ * records outside the timeline because both of their dates are empty.
  *
  * Because the search parameters are read on every `load`, the filters, the
  * favourites and the search bar actually reload the view.
@@ -25,6 +25,8 @@ export class GanttSoftModel extends Model {
         this.archInfo = params.archInfo;
         this.defaultOrderBy = this.archInfo.defaultOrder || [];
         this.records = [];
+        this.isTruncated = false;
+        this.unscheduledCount = null;
         this.config = {
             domain: params.domain || [],
             context: params.context || {},
@@ -87,9 +89,11 @@ export class GanttSoftModel extends Model {
      */
     async _load(config) {
         const loadId = ++this.loadId;
-        const records = await this._fetch(config);
+        const { records, isTruncated, unscheduledCount } = await this._fetch(config);
         if (loadId === this.loadId) {
             this.records = records;
+            this.isTruncated = isTruncated;
+            this.unscheduledCount = unscheduledCount;
             this.notify();
         }
     }
@@ -151,12 +155,38 @@ export class GanttSoftModel extends Model {
             config.domain,
             this._windowDomain(config.window),
         ]).toList();
-        const { records } = await this.orm.webSearchRead(this.resModel, domain, {
-            specification: getFieldsSpec(this.activeFields, this.fields, config.context || {}),
-            context: config.context,
-            order: orderByToString(this.orderBy),
-            limit: this.archInfo.limit,
-        });
-        return records;
+        const limit = this.archInfo.limit;
+        const [result, unscheduledCount] = await Promise.all([
+            this.orm.webSearchRead(this.resModel, domain, {
+                specification: getFieldsSpec(this.activeFields, this.fields, config.context || {}),
+                context: config.context,
+                order: orderByToString(this.orderBy),
+                // Read one extra record so a truncated window is reported
+                // instead of silently looking complete.
+                limit: limit + 1,
+            }),
+            config.window
+                ? this.orm.searchCount(
+                      this.resModel,
+                      Domain.and([
+                          config.domain,
+                          [
+                              [this.archInfo.dateStart, "=", false],
+                              [this.archInfo.dateStop, "=", false],
+                          ],
+                      ]).toList(),
+                      { context: config.context }
+                  )
+                : Promise.resolve(null),
+        ]);
+        const isTruncated = result.records.length > limit;
+        return {
+            records: isTruncated ? result.records.slice(0, limit) : result.records,
+            isTruncated,
+            // Without a window every record is loaded, so the renderer can
+            // count undated records itself. With a window they are outside its
+            // domain and need the separate count above.
+            unscheduledCount,
+        };
     }
 }

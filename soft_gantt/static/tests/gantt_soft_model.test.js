@@ -70,10 +70,15 @@ function makeArchInfo(overrides = {}) {
 
 function makeModel({ archInfo = makeArchInfo(), orm } = {}) {
     const calls = [];
+    const countCalls = [];
     const fakeOrm = orm || {
         webSearchRead: async (resModel, domain, kwargs) => {
             calls.push({ resModel, domain, kwargs });
             return { records: [{ id: 1 }, { id: 2 }] };
+        },
+        searchCount: async (resModel, domain, kwargs) => {
+            countCalls.push({ resModel, domain, kwargs });
+            return 0;
         },
     };
     const model = new GanttSoftModel(
@@ -89,7 +94,7 @@ function makeModel({ archInfo = makeArchInfo(), orm } = {}) {
         },
         { orm: fakeOrm }
     );
-    return { model, calls, fakeOrm };
+    return { model, calls, countCalls, fakeOrm };
 }
 
 describe("GanttSoftModel", () => {
@@ -132,8 +137,8 @@ describe("GanttSoftModel", () => {
         expect(flat).toInclude('"2026-03-31 21:00:00"');
     });
 
-    test("load reads the window, the order and the limit in one call", async () => {
-        const { model, calls } = makeModel();
+    test("load reads the window and counts undated records", async () => {
+        const { model, calls, countCalls } = makeModel();
         await model.load({ domain: [["id", ">", 0]], context: { lang: "en_US" } });
 
         expect(calls.length).toBe(1);
@@ -141,8 +146,51 @@ describe("GanttSoftModel", () => {
         expect(isPrefixDomain(domain)).toBe(true);
         expect(domain).toInclude(["id", ">", 0]);
         expect(kwargs.order).toBe("date_start ASC");
-        expect(kwargs.limit).toBe(500);
+        expect(kwargs.limit).toBe(501);
         expect(model.records).toHaveLength(2);
+        expect(countCalls).toHaveLength(1);
+        expect(countCalls[0].domain).toInclude(["date_start", "=", false]);
+        expect(countCalls[0].domain).toInclude(["date_deadline", "=", false]);
+        expect(model.unscheduledCount).toBe(0);
+    });
+
+    test("reads one extra record and reports a truncated window", async () => {
+        const { model, calls } = makeModel({
+            archInfo: makeArchInfo({ limit: 2 }),
+            orm: {
+                webSearchRead: async (resModel, domain, kwargs) => {
+                    calls.push({ resModel, domain, kwargs });
+                    return { records: [{ id: 1 }, { id: 2 }, { id: 3 }] };
+                },
+                searchCount: async () => 0,
+            },
+        });
+
+        await model.load();
+
+        expect(calls[0].kwargs.limit).toBe(3);
+        expect(model.records.map((record) => record.id)).toEqual([1, 2]);
+        expect(model.isTruncated).toBe(true);
+    });
+
+    test("counts undated records outside the visible window", async () => {
+        const { model, countCalls } = makeModel({
+            orm: {
+                webSearchRead: async () => ({ records: [{ id: 1 }] }),
+                searchCount: async (resModel, domain, kwargs) => {
+                    countCalls.push({ resModel, domain, kwargs });
+                    return 7;
+                },
+            },
+        });
+
+        await model.load({ domain: [["active", "=", true]] });
+
+        expect(model.unscheduledCount).toBe(7);
+        expect(countCalls).toHaveLength(1);
+        expect(countCalls[0].domain).toInclude(["active", "=", true]);
+        expect(countCalls[0].domain).toInclude(["date_start", "=", false]);
+        expect(countCalls[0].domain).toInclude(["date_deadline", "=", false]);
     });
 
     test("superseded loads settle without overwriting the newest records", async () => {
@@ -162,6 +210,7 @@ describe("GanttSoftModel", () => {
                     const records = callCount === 1 ? await firstFetch : await secondFetch;
                     return { records };
                 },
+                searchCount: async () => 0,
             },
         });
 
@@ -186,10 +235,12 @@ describe("GanttSoftModel", () => {
     });
 
     test("a window is optional: without one every record is read", async () => {
-        const { model, calls } = makeModel();
+        const { model, calls, countCalls } = makeModel();
         model.config.window = null;
         await model.reload();
         const domain = calls[0].domain;
         expect(domain).toEqual([]);
+        expect(countCalls).toHaveLength(0);
+        expect(model.unscheduledCount).toBe(null);
     });
 });
