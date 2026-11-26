@@ -1136,6 +1136,48 @@ export class GanttSoftRenderer extends Component {
         this.props.onBarClick(row, ev.currentTarget);
     }
 
+    /** Keyboard equivalent of a bar click, plus one-day moves with Alt+Arrow. */
+    onBarKeydown(ev, row) {
+        if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            this.onBarClick(ev, row);
+            return;
+        }
+        if (
+            this.props.canEdit &&
+            !row.collapsedGroup &&
+            ev.altKey &&
+            (ev.key === "ArrowLeft" || ev.key === "ArrowRight")
+        ) {
+            ev.preventDefault();
+            this.props.onReschedule(row.id, ev.key === "ArrowRight" ? 1 : -1);
+        }
+    }
+
+    /** Enter/Space on a group toggle has the same effect as a click. */
+    onToggleGroupKeydown(ev, row) {
+        if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            this.onToggleGroupClick(ev, row);
+        }
+    }
+
+    /** Arrow keys move a resize edge by one day without a pointer gesture. */
+    onResizeKeydown(ev, row, edge) {
+        if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") {
+            return;
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (this.props.onResize) {
+            this.props.onResize(row.id, edge, ev.key === "ArrowRight" ? 1 : -1);
+        }
+    }
+
+    resizeLabel(edge) {
+        return edge === "start" ? _t("Resize start") : _t("Resize end");
+    }
+
     /**
      * Drag a bar horizontally to move the record by a whole number of days.
      *

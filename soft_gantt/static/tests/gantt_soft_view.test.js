@@ -238,6 +238,19 @@ test("loads the records overlapping the window, including single date ones", asy
     expect(".o_gantt_soft_row").toHaveCount(3);
 });
 
+test("period navigation buttons expose accessible names", async () => {
+    await mountGanttView({
+        type: "gantt_soft",
+        resModel: "project.task",
+        state: { ...MARCH_STATE },
+    });
+
+    const buttons = queryAll(".o_gantt_soft_window_buttons button");
+    expect(buttons[0].getAttribute("aria-label")).toBe("Previous period");
+    expect(buttons[2].getAttribute("aria-label")).toBe("Next period");
+    expect(buttons[1].querySelector("i").getAttribute("aria-hidden")).toBe("true");
+});
+
 test("bars are editable when the view allows it", async () => {
     await mountGanttView({
         type: "gantt_soft",

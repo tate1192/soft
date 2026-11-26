@@ -6,8 +6,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 19.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-29 15:59+0000\n"
-"PO-Revision-Date: \n"
+"POT-Creation-Date: 2026-11-26 18:23+0000\n"
+"PO-Revision-Date: 2026-11-26 18:23+0000\n"
 "Last-Translator: Softteknik Bilisim <https://softteknik.com>\n"
 "Language-Team: Turkish\n"
 "Language: tr\n"
@@ -37,10 +37,29 @@ msgstr "Tarihi olmayan %s kayıt"
 #. module: soft_gantt
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
-msgid "A gantt_soft view can only contain <field> nodes, got <%(tag)s>."
+msgid "A <button> of a gantt_soft view must name a method or an action."
 msgstr ""
-"Bir gantt_soft görünümü yalnızca <field> düğümleri içerebilir, <%(tag)s> "
-"bulundu."
+"Bir gantt_soft görünümündeki <button>, bir metot veya action adı "
+"belirtmelidir."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"A <button> of a gantt_soft view needs a string or an icon: the card would "
+"draw an empty button otherwise."
+msgstr ""
+"Bir gantt_soft görünümündeki <button> için string veya icon gerekli; aksi "
+"hâlde kart boş bir buton çizer."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"A gantt_soft view can only contain <field> or <button> nodes, got <%(tag)s>."
+msgstr ""
+"Bir gantt_soft görünümü yalnızca <field> veya <button> düğümleri içerebilir;"
+" <%(tag)s> bulundu."
 
 #. module: soft_gantt
 #: model:ir.model,name:soft_gantt.model_ir_actions_act_window_view
@@ -52,6 +71,12 @@ msgstr "Eylem Pencere Görünümü"
 #: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
 msgid "CSV"
 msgstr "CSV"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
+msgid "CSV contains only the first %s records of this window."
+msgstr "CSV yalnızca bu pencerenin ilk %s kaydını içeriyor."
 
 #. module: soft_gantt
 #. odoo-javascript
@@ -107,6 +132,16 @@ msgstr ""
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
 msgid ""
+"Field %(field)r on %(comodel)s, used as group_avatar in a gantt_soft view, "
+"must be a binary image field, not %(type)s."
+msgstr ""
+"%(comodel)s modelindeki %(field)r alanı, gantt_soft görünümünde group_avatar"
+" olarak kullanıldığında binary image alanı olmalıdır; %(type)s değil."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
 "Field %(field)r used as %(attribute)s in a gantt_soft view must be of type "
 "%(types)s, not %(type)s."
 msgstr ""
@@ -117,11 +152,32 @@ msgstr ""
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
 msgid ""
+"Field %(field)r used as %(attribute)s in a gantt_soft view must be stored or"
+" searchable: the window is read with a domain on it."
+msgstr ""
+"%(field)r alanı, gantt_soft görünümünde %(attribute)s olarak kullanıldığında"
+" stored veya searchable olmalıdır; pencere bu alan üzerinde domain ile "
+"okunuyor."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
 "Field %(field)r used as dependencies in a gantt_soft view must point at "
 "%(model)s, not at %(comodel)s."
 msgstr ""
 "Bir gantt_soft görünümünde dependencies olarak kullanılan %(field)r alanı "
 "%(model)s modelini göstermeli, %(comodel)s modelini değil."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Field %(field)r used as group_by in a gantt_soft view must be of type "
+"%(types)s, not %(type)s."
+msgstr ""
+"%(field)r alanı, gantt_soft görünümünde group_by olarak kullanıldığında "
+"%(types)s tipinde olmalıdır; %(type)s değil."
 
 #. module: soft_gantt
 #. odoo-javascript
@@ -170,6 +226,26 @@ msgstr ""
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
 msgid ""
+"Invalid attribute(s) %(invalid)s on a <button> of a gantt_soft view. Valid "
+"attributes are: %(valid)s"
+msgstr ""
+"<button> üzerindeki geçersiz attribute(ler): %(invalid)s. Geçerli "
+"attribute'ler: %(valid)s"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid decoration %(attribute)s in a gantt_soft view. Valid decorations "
+"are: %(decorations)s"
+msgstr ""
+"gantt_soft görünümünde geçersiz decoration: %(attribute)s. Geçerli "
+"decoration'lar: %(decorations)s"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
 "Invalid default_range %(range)r in gantt_soft view. Valid ranges are: "
 "%(ranges)s"
 msgstr ""
@@ -185,6 +261,26 @@ msgid ""
 msgstr ""
 "gantt_soft görünümünde geçersiz mode: %(mode)r. Görünümün ölçeklerinden biri"
 " olmalı: %(scales)s"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid precision %(value)r for the %(scale)r scale of a gantt_soft view "
+"(expected %(unit)r:<%(values)s>)."
+msgstr ""
+"gantt_soft görünümünün %(scale)r ölçeği için geçersiz precision: %(value)r "
+"(beklenen %(unit)r:<%(values)s>)."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Invalid scale %(scale)r in the precision of a gantt_soft view (expected one "
+"of %(scales)s)."
+msgstr ""
+"gantt_soft görünümünün precision bilgisinde geçersiz ölçek: %(scale)r "
+"(beklenenlerden biri: %(scales)s)."
 
 #. module: soft_gantt
 #. odoo-python
@@ -219,6 +315,12 @@ msgstr "Ad"
 #: code:addons/soft_gantt/static/src/gantt/gantt_controller.xml:0
 msgid "New"
 msgstr "Yeni"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "New record in this group"
+msgstr "Bu gruba yeni kayıt"
 
 #. module: soft_gantt
 #. odoo-javascript
@@ -260,6 +362,16 @@ msgstr "Planlanacak kayıt yok."
 
 #. module: soft_gantt
 #. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid ""
+"Only the first %s records of this window are shown; narrow the period to see"
+" the rest."
+msgstr ""
+"Bu pencerenin yalnızca ilk %s kaydı gösteriliyor; kalanı görmek için aralığı"
+" daraltın."
+
+#. module: soft_gantt
+#. odoo-javascript
 #: code:addons/soft_gantt/static/src/gantt/gantt_popover.xml:0
 msgid "Open"
 msgstr "Aç"
@@ -284,6 +396,18 @@ msgstr "Çeyrek"
 
 #. module: soft_gantt
 #. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Resize end"
+msgstr "Bitişi yeniden boyutlandır"
+
+#. module: soft_gantt
+#. odoo-javascript
+#: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
+msgid "Resize start"
+msgstr "Başlangıcı yeniden boyutlandır"
+
+#. module: soft_gantt
+#. odoo-javascript
 #: code:addons/soft_gantt/static/src/gantt/gantt_controller.js:0
 msgid "Show the period containing today"
 msgstr "Bugünü içeren dönemi göster"
@@ -298,10 +422,76 @@ msgstr "gantt_soft görünümünde %(attribute)s özniteliği zorunludur."
 #. odoo-python
 #: code:addons/soft_gantt/models/ir_ui_view.py:0
 msgid ""
+"The %(attribute)s attribute of a gantt_soft view must be a boolean (0, 1, "
+"true or false), got %(value)r."
+msgstr ""
+"gantt_soft görünümünün %(attribute)s attribute'u boolean olmalıdır (0, 1, "
+"true veya false); %(value)r bulundu."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The %(attribute)s attribute of a gantt_soft view must be an expression."
+msgstr "gantt_soft görünümünün %(attribute)s attribute'u bir ifade olmalıdır."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The %(scale)r scale cannot be subdivided: the precision attribute is "
+"available on %(scales)s."
+msgstr ""
+"%(scale)r ölçeği alt bölünemez; precision attribute'u %(scales)s üzerinde "
+"kullanılabilir."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The group_avatar attribute of a gantt_soft view requires a many2one "
+"group_by: %(field)r is a %(type)s."
+msgstr ""
+"gantt_soft görünümünün group_avatar attribute'u many2one group_by "
+"gerektirir: %(field)r bir %(type)s."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The group_avatar attribute of a gantt_soft view requires the group_by "
+"attribute: there is no group row to draw it on."
+msgstr ""
+"gantt_soft görünümünün group_avatar attribute'u group_by attribute'unu "
+"gerektirir; çizilecek grup satırı yok."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The group_by attribute of a gantt_soft view must name at least one field."
+msgstr ""
+"gantt_soft görünümünün group_by attribute'u en az bir alan adı "
+"belirtmelidir."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
 "The limit of a gantt_soft view must be a positive integer, got %(limit)r."
 msgstr ""
 "gantt_soft görünümünün limit değeri pozitif bir tam sayı olmalı, %(limit)r "
 "verildi."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The precision attribute of a gantt_soft view must be a dict like {'day': "
+"'hour:quarter'}."
+msgstr ""
+"gantt_soft görünümünün precision attribute'u {'day': 'hour:quarter'} gibi "
+"bir dict olmalıdır."
 
 #. module: soft_gantt
 #. odoo-python
@@ -314,10 +504,30 @@ msgstr ""
 "%(scales)s"
 
 #. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"The type of a <button> of a gantt_soft view must be one of %(types)s, got "
+"%(type)r."
+msgstr ""
+"gantt_soft görünümündeki <button> tipi %(types)s değerlerinden biri "
+"olmalıdır; %(type)r bulundu."
+
+#. module: soft_gantt
 #. odoo-javascript
 #: code:addons/soft_gantt/static/src/gantt/gantt_renderer.js:0
 msgid "Today"
 msgstr "Bugün"
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Unknown field %(field)r on %(comodel)s, used as group_avatar in a gantt_soft"
+" view."
+msgstr ""
+"%(comodel)s modelinde, gantt_soft görünümünde group_avatar olarak kullanılan"
+" %(field)r alanı bilinmiyor."
 
 #. module: soft_gantt
 #. odoo-python
@@ -328,6 +538,25 @@ msgid ""
 msgstr ""
 "gantt_soft görünümünde (%(model)s) %(attribute)s olarak kullanılan %(field)r"
 " alanı bilinmiyor."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Unknown field %(field)r used as group_by in a gantt_soft view of %(model)s."
+msgstr ""
+"%(model)s modelinin gantt_soft görünümünde group_by olarak kullanılan "
+"%(field)r alanı bilinmiyor."
+
+#. module: soft_gantt
+#. odoo-python
+#: code:addons/soft_gantt/models/ir_ui_view.py:0
+msgid ""
+"Unknown method %(name)r on %(model)s, used as the type object <button> of a "
+"gantt_soft view."
+msgstr ""
+"%(model)s modelinde, gantt_soft görünümündeki type object <button> için "
+"kullanılan %(name)r metodu bilinmiyor."
 
 #. module: soft_gantt
 #: model:ir.model,name:soft_gantt.model_ir_ui_view

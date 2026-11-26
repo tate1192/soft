@@ -61,9 +61,14 @@
                                      text is not part of the label), the click is what
                                      asks the controller to hide or show the group. -->
                                 <span t-if="row.key !== undefined"
+                                      role="button"
+                                      tabindex="0"
+                                      t-att-aria-expanded="row.collapsed ? 'false' : 'true'"
+                                      t-att-aria-label="toggleTitle(row.collapsed)"
                                       t-attf-class="o_gantt_soft_group_toggle {{ row.collapsed ? 'o_gantt_soft_group_toggle_collapsed' : '' }}"
                                       t-att-title="toggleTitle(row.collapsed)"
-                                      t-on-click="(ev) => this.onToggleGroupClick(ev, row)"/>
+                                      t-on-click="(ev) => this.onToggleGroupClick(ev, row)"
+                                      t-on-keydown="(ev) => this.onToggleGroupKeydown(ev, row)"/>
                                 <img t-if="row.avatarUrl" class="o_gantt_soft_row_avatar"
                                      t-att-src="row.avatarUrl" alt=""/>
                                 <span class="o_gantt_soft_row_label" t-esc="row.label"/>
@@ -71,7 +76,7 @@
                                         type="button" class="o_gantt_soft_group_add"
                                         t-att-title="newRecordTitle"
                                         t-att-aria-label="newRecordTitle"
-                                        t-on-click="(ev) => this.onGroupAddClick(ev, row)"><i class="fa fa-plus"/></button>
+                                        t-on-click="(ev) => this.onGroupAddClick(ev, row)"><i class="fa fa-plus" aria-hidden="true"/></button>
                             </div>
                             <div t-attf-style="height: {{ paddingBottom }}px"/>
                         </div>
@@ -129,16 +134,29 @@
                                          t-on-pointerdown="(ev) => this.onBarPointerDown(ev, bar)">
                                         <div class="o_gantt_soft_bar_progress" t-if="bar.progress !== null"
                                              t-attf-style="width: {{ bar.progress }}%"/>
+                                        <span class="o_gantt_soft_bar_activation"
+                                              role="button"
+                                              tabindex="0"
+                                              t-att-aria-label="bar.label"
+                                              t-on-keydown="(ev) => this.onBarKeydown(ev, bar)"/>
                                         <!-- Resize grips, only when the record may be
                                              edited: dragging one changes that date. A
                                              folded group has no single record to resize,
                                              and a milestone has no duration to resize. -->
                                         <span t-if="props.canEdit and !bar.collapsedGroup and !bar.milestone"
                                               class="o_gantt_soft_bar_handle o_gantt_soft_bar_handle_start"
+                                              role="button"
+                                              tabindex="0"
+                                              t-att-aria-label="resizeLabel('start')"
+                                              t-on-keydown="(ev) => this.onResizeKeydown(ev, bar, 'start')"
                                               t-on-pointerdown="(ev) => this.onResizePointerDown(ev, bar, 'start')"/>
                                         <span t-if="!bar.milestone" class="o_gantt_soft_bar_label" t-esc="bar.label"/>
                                         <span t-if="props.canEdit and !bar.collapsedGroup and !bar.milestone"
                                               class="o_gantt_soft_bar_handle o_gantt_soft_bar_handle_end"
+                                              role="button"
+                                              tabindex="0"
+                                              t-att-aria-label="resizeLabel('end')"
+                                              t-on-keydown="(ev) => this.onResizeKeydown(ev, bar, 'end')"
                                               t-on-pointerdown="(ev) => this.onResizePointerDown(ev, bar, 'end')"/>
                                     </div>
                                 </div>

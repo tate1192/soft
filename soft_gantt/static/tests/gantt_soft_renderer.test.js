@@ -330,6 +330,43 @@ describe("GanttSoftRenderer", () => {
         expect(clicked).toEqual([1]);
     });
 
+    test("a bar exposes button semantics and opens with the keyboard", async () => {
+        const clicked = [];
+        await mountRenderer({
+            records: [makeRecord(1, "2026-03-02 00:00:00", "2026-03-03 00:00:00")],
+            onBarClick: (row) => clicked.push(row.id),
+        });
+
+        const bar = queryFirst(".o_gantt_soft_bar_activation");
+        expect(bar.getAttribute("role")).toBe("button");
+        expect(bar.getAttribute("tabindex")).toBe("0");
+        expect(bar.getAttribute("aria-label")).toBe("Task 1");
+        bar.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
+        );
+
+        expect(clicked).toEqual([1]);
+    });
+
+    test("Alt+Arrow moves a focused bar by one day", async () => {
+        const rescheduled = [];
+        await mountRenderer({
+            records: [makeRecord(1, "2026-03-02 00:00:00", "2026-03-05 00:00:00")],
+            onReschedule: (id, days) => rescheduled.push([id, days]),
+        });
+
+        queryFirst(".o_gantt_soft_bar_activation").dispatchEvent(
+            new KeyboardEvent("keydown", {
+                key: "ArrowRight",
+                altKey: true,
+                bubbles: true,
+                cancelable: true,
+            })
+        );
+
+        expect(rescheduled).toEqual([[1, 1]]);
+    });
+
     test("dragging a bar reschedules by the number of columns crossed", async () => {
         const rescheduled = [];
         await mountRenderer({
@@ -769,6 +806,28 @@ describe("GanttSoftRenderer", () => {
         expect(resized).toEqual([[1, "end", -90]]);
     });
 
+    test("arrow keys resize a focused handle by one day", async () => {
+        const resized = [];
+        await mountRenderer({
+            records: [makeRecord(1, "2026-03-02 00:00:00", "2026-03-05 00:00:00")],
+            onResize: (id, edge, days) => resized.push([id, edge, days]),
+        });
+
+        const handle = queryFirst(".o_gantt_soft_bar_handle_end");
+        expect(handle.getAttribute("role")).toBe("button");
+        expect(handle.getAttribute("tabindex")).toBe("0");
+        expect(handle.getAttribute("aria-label")).toBe("Resize end");
+        handle.dispatchEvent(
+            new KeyboardEvent("keydown", {
+                key: "ArrowRight",
+                bubbles: true,
+                cancelable: true,
+            })
+        );
+
+        expect(resized).toEqual([[1, "end", 1]]);
+    });
+
     test("dragging the start edge moves the start, not the end", async () => {
         const resized = [];
         await mountRenderer({
@@ -904,6 +963,29 @@ describe("GanttSoftRenderer", () => {
         await animationFrame();
 
         // The group key travels back, and the row's own click does not fire.
+        expect(toggled).toEqual(["7"]);
+    });
+
+    test("a group toggle exposes expanded state and works with the keyboard", async () => {
+        const toggled = [];
+        const team = { id: 7, display_name: "Alpha" };
+        await mountRenderer({
+            archInfo: makeArchInfo({ groupByField: "team_id" }),
+            records: [
+                makeRecord(1, "2026-03-02 00:00:00", "2026-03-03 00:00:00", { team_id: team }),
+                makeRecord(2, "2026-03-04 00:00:00", "2026-03-05 00:00:00", { team_id: team }),
+            ],
+            onToggleGroup: (key) => toggled.push(key),
+        });
+
+        const toggle = queryFirst(".o_gantt_soft_group_toggle");
+        expect(toggle.getAttribute("role")).toBe("button");
+        expect(toggle.getAttribute("tabindex")).toBe("0");
+        expect(toggle.getAttribute("aria-expanded")).toBe("true");
+        toggle.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
+        );
+
         expect(toggled).toEqual(["7"]);
     });
 
