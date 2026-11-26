@@ -439,11 +439,12 @@ export class GanttSoftController extends Component {
             stop,
             this.props.context
         );
+        const formView = this.env.config.views?.find(([, viewType]) => viewType === "form");
         await this.actionService.doAction(
             {
                 type: "ir.actions.act_window",
                 res_model: this.props.resModel,
-                views: [[false, "form"]],
+                views: [[formView?.[0] || false, "form"]],
                 target: "new",
                 context,
             },
