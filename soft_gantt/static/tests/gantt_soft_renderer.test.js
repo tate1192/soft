@@ -241,7 +241,7 @@ describe("GanttSoftRenderer", () => {
         expect(".o_gantt_soft_footer").toHaveText("7 record(s) without a date");
     });
 
-    test("explains an empty window when only undated records exist", async () => {
+    test("an empty visible window keeps the global unscheduled count in its footer", async () => {
         await mountRenderer({
             records: [],
             window: windowRange(Date.parse("2026-03-15T00:00:00Z"), "month"),
@@ -249,10 +249,8 @@ describe("GanttSoftRenderer", () => {
         });
 
         expect(".o_gantt_soft_grid").toHaveCount(0);
-        expect(".o_gantt_soft_placeholder").toHaveText(
-            "No record carries a date yet: set one to see it on the timeline."
-        );
-        expect(".o_gantt_soft_footer").toHaveCount(0);
+        expect(".o_gantt_soft_placeholder").toHaveText("Nothing to schedule.");
+        expect(".o_gantt_soft_footer").toHaveText("3 record(s) without a date");
     });
 
     test("takes the colour and the progress from the arch", async () => {

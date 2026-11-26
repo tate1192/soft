@@ -1041,7 +1041,7 @@ export class GanttSoftRenderer extends Component {
     }
 
     get isEmpty() {
-        return this.props.records.length === 0 && !this.unscheduledCount;
+        return this.props.records.length === 0;
     }
 
     get hasNothingScheduled() {
