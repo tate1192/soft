@@ -9,7 +9,7 @@ import tempfile
 from datetime import datetime
 
 from odoo import models, fields, api, _
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessDenied, UserError
 from odoo.tools import config
 
 _logger = logging.getLogger(__name__)
@@ -106,6 +106,8 @@ class BackupRestoreWizard(models.TransientModel):
     )
     encryption_key = fields.Char(
         string='Encryption Key (base64)',
+        groups='backup_versatile.group_backup_admin',
+        copy=False,
         help='The AES-256 key used when the backup was created '
              '(base64-encoded, 32 bytes)',
     )
@@ -140,6 +142,13 @@ class BackupRestoreWizard(models.TransientModel):
         elif self.provider_type == 'cloud' and self.cloud_provider_id:
             return self.cloud_provider_id
         raise UserError('Please select a provider first.')
+
+    def _assert_system_admin(self):
+        """Restore is a server-wide operation, not a per-database privilege."""
+        if not self.env.user.has_group('base.group_system'):
+            raise AccessDenied(
+                "Database restore requires system administrator rights."
+            )
 
     def _validate_restore_options(self):
         """Reject option combinations that would destroy data."""
@@ -243,6 +252,7 @@ class BackupRestoreWizard(models.TransientModel):
     def action_restore(self):
         """Execute the restore process."""
         self.ensure_one()
+        self._assert_system_admin()
 
         if not self.selected_backup:
             raise UserError('Please select a backup file to restore.')

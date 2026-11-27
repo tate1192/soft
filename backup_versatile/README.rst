@@ -83,10 +83,11 @@ Security
 ========
 
 Two groups. *User* reads schedules, providers and jobs (read-only ACL on every
-model, no wizard). *Administrator* configures schedules and providers and is the
-only group that can restore. Credentials live on the provider record and are
-rendered as password fields; the encryption key is stored base64 encoded on the
-configuration and is masked in the form.
+model, no wizard). *Administrator* configures schedules and providers. Restore and
+cross-database backup operations additionally require ``base.group_system``
+because they use server-wide PostgreSQL privileges. Credentials live on the
+provider record and are rendered as password fields; the encryption key is stored
+base64 encoded on the configuration and is masked in the form.
 
 Installation
 ============

@@ -42,7 +42,8 @@ class BackupConfig(models.Model):
         string='Database Name',
         required=True,
         default=lambda self: self._get_current_database(),
-        help='Name of the database to backup'
+        help='Name of the database to backup. Non-system backup administrators '
+             'can only back up the database served by this Odoo instance.'
     )
     backup_format = fields.Selection([
         ('zip', 'ZIP Archive (includes filestore)'),
