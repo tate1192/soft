@@ -387,6 +387,11 @@ class BackupConfig(models.Model):
         """Generate a random AES-256 key and store it base64-encoded."""
         self._assert_backup_admin()
         self.ensure_one()
+        if self.encrypt_key:
+            raise UserError(
+                'An encryption key already exists. Export and store it securely '
+                'before deliberately clearing this field and generating a new key.'
+            )
         try:
             import secrets
             import base64
@@ -699,7 +704,9 @@ class BackupConfig(models.Model):
 
         try:
             # Check if mail server is configured
-            mail_server = self.env['ir.mail_server'].sudo().search([], order='sequence asc', limit=1)
+            mail_server = self.env['ir.mail_server'].sudo().search(
+                [('active', '=', True)], order='sequence asc', limit=1,
+            )
             if not mail_server:
                 _logger.warning("Cannot send backup notification: no mail server configured in Odoo")
                 return
@@ -734,20 +741,20 @@ class BackupConfig(models.Model):
 
             # Build and send email
             _logger.info("Sending backup notification email from %s to %s", sender_email, recipient_emails)
-            msg = mail_server.build_email(
+            msg = mail_server._build_email__(
                 sender_email,
                 recipient_emails,
                 subject,
                 body
             )
-            mail_server.send_email(msg)
+            mail_server.send_email(msg, mail_server_id=mail_server.id)
             _logger.info("Backup notification sent successfully")
         except Exception as e:
             # Log detailed error but don't raise - email failures shouldn't affect backup success
             _logger.warning(
                 "Failed to send backup notification for job %s (Status: %s). "
-                "Error: %s. The backup itself completed successfully, but email notification failed. "
-                "Please check your mail server configuration.",
+                "Error: %s. The backup result is unchanged, but the email "
+                "notification failed. Please check the mail server configuration.",
                 backup_job.id, notification_type, str(e)
             )
 
