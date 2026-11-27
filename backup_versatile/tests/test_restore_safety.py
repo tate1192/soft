@@ -200,7 +200,14 @@ class TestRestoreSafety(TransactionCase):
 
     def test_psql_restore_uses_random_restrict_token_and_X(self):
         wizard = self._wizard()
-        restore = {'method': 'psql', 'source': '/tmp/dump.sql'}
+        # pg_dump >= 18 writes its own guard lines into a plain dump; psql
+        # refuses a nested \restrict, so the restore must hand psql a copy
+        # without them and keep its own random token.
+        fd, dump_path = tempfile.mkstemp(suffix='.sql')
+        with os.fdopen(fd, 'w') as handle:
+            handle.write('--\n\\restrict DUMPKEY\nCREATE TABLE t (id int);\n\\unrestrict DUMPKEY\n')
+        self.addCleanup(os.unlink, dump_path)
+        restore = {'method': 'psql', 'source': dump_path}
         with patch.object(restore_module.secrets, 'token_hex', side_effect=['abc123', 'def456']) as token, \
                 patch.object(type(wizard), '_run_pg_tool') as run_tool:
             wizard._restore_staging_database('stage_one', restore)
@@ -213,6 +220,13 @@ class TestRestoreSafety(TransactionCase):
         self.assertIn('\\restrict abc123', first_args)
         self.assertIn('\\restrict def456', second_args)
         self.assertNotIn('\\restrict abc123', second_args)
+        stripped_path = first_args[first_args.index('-f') + 1]
+        with open(stripped_path) as handle:
+            stripped = handle.read()
+        self.assertNotIn('\\restrict', stripped)
+        self.assertNotIn('\\unrestrict', stripped)
+        self.assertIn('CREATE TABLE t (id int);', stripped)
+        self.addCleanup(lambda: os.path.exists(stripped_path) and os.unlink(stripped_path))
 
     def test_pg_tools_use_odoo_path_and_environment(self):
         wizard = self._wizard()

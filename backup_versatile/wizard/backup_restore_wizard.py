@@ -605,15 +605,33 @@ class BackupRestoreWizard(models.TransientModel):
             'filestore': None,
         }
 
+    _DUMP_RESTRICT_RE = re.compile(r'^\s*\\(un)?restrict\b')
+
+    def _strip_dump_restrict(self, dump_path):
+        """Write a copy of *dump_path* without pg_dump >= 18 guard lines."""
+        stripped_path = dump_path + '.norestrict'
+        with open(dump_path, 'r', encoding='utf-8', errors='surrogateescape') as source, \
+                open(stripped_path, 'w', encoding='utf-8', errors='surrogateescape') as target:
+            for line in source:
+                if self._DUMP_RESTRICT_RE.match(line):
+                    continue
+                target.write(line)
+        return stripped_path
+
     def _restore_staging_database(self, staging_database, restore):
         """Restore into staging with psql meta-commands locked down."""
         if restore['method'] == 'psql':
             restrict_token = secrets.token_hex()
+            # pg_dump >= 18 emits its own guard lines (\restrict KEY ... \unrestrict
+            # KEY).  psql rejects a nested \restrict ("only \unrestrict is
+            # allowed"), so a dump carrying its own guard fails under ours.
+            # Strip the dump's lines and keep our outer guard.
+            restore_source = self._strip_dump_restrict(restore['source'])
             args = [
                 '--dbname=' + staging_database,
                 '-X', '-q', '-v', 'ON_ERROR_STOP=1', '--single-transaction',
                 '-c', '\\restrict ' + restrict_token,
-                '-f', restore['source'],
+                '-f', restore_source,
             ]
             self._run_pg_tool('psql', args, timeout=self._RESTORE_TIMEOUT)
         else:
