@@ -844,6 +844,14 @@ class BackupJob(models.Model):
 
         return output_path
     
+    @staticmethod
+    def _provider_result_key_for(provider):
+        """Canonical provider key, tolerating providers without the helper."""
+        helper = getattr(provider, '_provider_result_key', None)
+        if callable(helper):
+            return helper()
+        return '%s:%s' % (provider._name, provider.id)
+
     def _upload_to_providers_sequential(self, backup_file_path, providers):
         """Upload to providers sequentially."""
         results = {}
@@ -855,7 +863,10 @@ class BackupJob(models.Model):
             
             try:
                 result = provider.upload_backup(backup_file_path, self.backup_filename)
-                if result.get('success'):
+                if result.get('success') and self.config_id and self.backup_filename:
+                    # Artifact rows are the durable ownership proof retention
+                    # relies on; an unsaved job (shell or test call) has neither
+                    # config nor filename and must not create a row.
                     metadata = result.get('metadata') or {}
                     artifact = self.env['backup.artifact'].create({
                         'job_id': self.id,
@@ -871,7 +882,7 @@ class BackupJob(models.Model):
                         'size_bytes': metadata.get('size_bytes') or False,
                     })
                     result['artifact_id'] = artifact.id
-                results[provider._provider_result_key()] = result
+                results[self._provider_result_key_for(provider)] = result
                 
                 if result.get('success'):
                     self._log(f"Upload to {label} successful")
@@ -880,7 +891,7 @@ class BackupJob(models.Model):
             except Exception as e:
                 error_msg = f"Upload to {label} failed with exception: {e}"
                 self._log(error_msg)
-                results[provider._provider_result_key()] = {
+                results[self._provider_result_key_for(provider)] = {
                     'success': False,
                     'message': str(e),
                     'metadata': {}
