@@ -10,6 +10,7 @@ import os
 import shlex
 import tempfile
 import types
+import uuid
 
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
@@ -130,7 +131,8 @@ class BackupProviderSftp(models.Model):
     preserve_file_permissions = fields.Boolean(
         string='Preserve File Permissions',
         default=True,
-        help='Preserve file permissions during transfer'
+        help='Retained for backward compatibility. Uploaded backups are always '
+             'set to owner-only permissions (0600).'
     )
     max_concurrent_transfers = fields.Integer(
         string='Max Concurrent Transfers',
@@ -290,7 +292,7 @@ class BackupProviderSftp(models.Model):
         return safe
 
     def _upload_backup_impl(self, backup_file_path, remote_filename):
-        """Upload backup file and verify the transferred size."""
+        """Upload via a unique partial name, verify it, then rename atomically."""
         with self._sftp_session() as session:
             sftp = session.sftp
 
@@ -298,27 +300,45 @@ class BackupProviderSftp(models.Model):
             if self.create_remote_dirs:
                 self._ensure_remote_directory(sftp, self.remote_directory)
 
-            # Upload file
+            remote_filename = self._sanitize_remote_filename(remote_filename)
             remote_path = "%s/%s" % (
                 self.remote_directory.rstrip('/'),
-                self._sanitize_remote_filename(remote_filename),
+                remote_filename,
+            )
+            part_path = "%s/.%s.%s.part" % (
+                self.remote_directory.rstrip('/'),
+                remote_filename,
+                uuid.uuid4().hex,
             )
 
-            # ``confirm=True`` makes Paramiko verify the remote size itself
-            sftp.put(backup_file_path, remote_path, confirm=True)
+            try:
+                # Never expose a partial transfer under the final backup name.
+                # ``confirm=True`` checks the size during the PUT; the explicit
+                # stat below verifies it again before the atomic rename.
+                sftp.put(backup_file_path, part_path, confirm=True)
+                sftp.chmod(part_path, 0o600)
 
-            if self.preserve_file_permissions:
-                sftp.chmod(remote_path, os.stat(backup_file_path).st_mode)
+                local_stats = os.stat(backup_file_path)
+                remote_stats = sftp.stat(part_path)
+                if local_stats.st_size != remote_stats.st_size:
+                    raise UserError(
+                        "Upload verification failed. Local size: %d, Remote size: %d"
+                        % (local_stats.st_size, remote_stats.st_size)
+                    )
 
-            # Verify upload by checking file size
-            local_stats = os.stat(backup_file_path)
-            remote_stats = sftp.stat(remote_path)
-
-            if local_stats.st_size != remote_stats.st_size:
-                raise UserError(
-                    "Upload verification failed. Local size: %d, Remote size: %d"
-                    % (local_stats.st_size, remote_stats.st_size)
-                )
+                sftp.rename(part_path, remote_path)
+                part_path = None
+            except Exception:
+                if part_path:
+                    try:
+                        sftp.remove(part_path)
+                    except Exception as cleanup_error:
+                        # Cleanup must not hide the original upload error.
+                        _logger.warning(
+                            "Could not remove partial SFTP backup %s: %s",
+                            part_path, cleanup_error,
+                        )
+                raise
 
             return {
                 'success': True,
@@ -328,7 +348,7 @@ class BackupProviderSftp(models.Model):
                     'size_bytes': remote_stats.st_size,
                     'size_gb': remote_stats.st_size / (1024**3),
                     'upload_date': datetime.datetime.now(),
-                    'permissions': oct(remote_stats.st_mode)
+                    'permissions': oct(0o600),
                 }
             }
 

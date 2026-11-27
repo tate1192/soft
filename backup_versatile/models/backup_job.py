@@ -4,11 +4,15 @@ import os
 import datetime
 import glob
 import re
+import string
 import subprocess
 import tempfile
+import threading
 import time
 import json
 import shutil
+import stat
+import struct
 import zipfile
 import logging
 
@@ -21,6 +25,7 @@ except ImportError:
 from odoo import models, fields, api, tools
 from odoo.exceptions import UserError, AccessDenied
 from odoo.tools.misc import exec_pg_environ, find_pg_tool
+from odoo.tools import SQL
 
 _logger = logging.getLogger(__name__)
 
@@ -31,6 +36,19 @@ try:
 except ImportError:
     AESGCM = None
     CRYPTOGRAPHY_AVAILABLE = False
+
+
+_ENCRYPTION_MAGIC = b'BVENC'
+_ENCRYPTION_VERSION = 2
+_ENCRYPTION_V2_PREFIX = _ENCRYPTION_MAGIC + bytes([_ENCRYPTION_VERSION])
+_ENCRYPTION_CHUNK_SIZE = 16 * 1024 * 1024
+_ENCRYPTION_NONCE_SIZE = 12
+_ENCRYPTION_TAG_SIZE = 16
+_ENCRYPTION_V2_HEADER = struct.Struct('<5sBIQ')
+_ENCRYPTION_CHUNK_INDEX = struct.Struct('<Q')
+_ENCRYPTION_AAD = struct.Struct('<IQII')
+_PG_STDERR_LIMIT = 64 * 1024
+_FILENAME_MAX_BYTES = 255
 
 
 class BackupJob(models.Model):
@@ -229,9 +247,6 @@ class BackupJob(models.Model):
         # mid-backup the row (and later the watchdog below) must still exist.
         self._commit_progress()
 
-        # Generate backup filename (no I/O, safe before mkdtemp)
-        self.backup_filename = self._generate_backup_filename()
-
         # Allocate the temp dir up front so the outer finally always owns it.
         # Previously this was created inside _create_backup_file, so if that
         # method raised before returning, the outer finally saw temp_dir=None
@@ -240,6 +255,11 @@ class BackupJob(models.Model):
         temp_dir = tempfile.mkdtemp(prefix='odoo_backup_')
         self._mark_temp_dir_owner(temp_dir)
         try:
+            # Validate and generate the filename inside the job lifecycle so a
+            # bad template is recorded as a failed job and the temp dir is
+            # still cleaned up.
+            self.backup_filename = self._generate_backup_filename()
+
             # Fail fast if the configured database is not even on this server
             # (a configuration carried over from another database keeps the
             # original name), then if a provider cannot receive the file.
@@ -249,7 +269,7 @@ class BackupJob(models.Model):
             self._preflight_providers()
 
             # Create backup file inside our temp dir
-            backup_file_path = self._create_backup_file(temp_dir)
+            backup_file_path, filestore_problems = self._create_backup_file(temp_dir)
 
             # Get backup file size and store as MB with sub-MB precision (Float)
             size_bytes = os.path.getsize(backup_file_path)
@@ -278,6 +298,23 @@ class BackupJob(models.Model):
                 self.status = 'warning'
                 self.error_message = f"Only {successful_uploads}/{total_providers} provider uploads succeeded"
                 success = True  # Partial success
+            elif filestore_problems:
+                # The archive is complete for every file the filestore still
+                # holds, but the database references files that are not there.
+                # Say so loudly: a warning still sends the failure notification
+                # and keeps retention from pruning the last good copies.
+                problems = filestore_problems
+                self.status = 'warning'
+                self.error_message = (
+                    'Backup stored with a partial filestore: %d missing file(s), '
+                    '%d size mismatch(es), %d unusable metadata row(s)'
+                    % (
+                        len(problems.get('missing_files') or []),
+                        len(problems.get('size_mismatch') or []),
+                        len(problems.get('invalid_metadata') or []),
+                    )
+                )
+                success = True
             else:
                 # All uploads succeeded
                 self.status = 'success'
@@ -332,34 +369,82 @@ class BackupJob(models.Model):
             _logger.warning("Could not commit backup job progress: %s", e)
     
     def _generate_backup_filename(self):
-        """Generate backup filename based on template."""
-        template = self.config_id.backup_name_template or '{database}_{timestamp}.{format}'
-        
-        # Prepare template variables
-        timestamp = datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+        """Generate a unique, filesystem-safe filename from the template."""
+        template = self.config_id.backup_name_template
+        if template is None or template is False:
+            template = '{database}_{timestamp}_{job}.{format}'
+        if not isinstance(template, str) or not template:
+            raise UserError('Backup name template must not be empty.')
+        if '\x00' in template:
+            raise UserError('Backup name template must not contain NUL bytes.')
+
+        timestamp = datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S_%f')
+        job_id = self.id if isinstance(self.id, int) and self.id > 0 else 'new'
         variables = {
             'database': self.database_name,
             'timestamp': timestamp,
             'format': self.backup_format,
             'config': self.config_id.name,
+            'job': str(job_id),
         }
-        
-        # Replace variables in template
+
+        try:
+            parts = list(string.Formatter().parse(template))
+        except ValueError as e:
+            raise UserError('Invalid backup name template: %s' % e)
+
+        field_names = set()
+        for _literal, field_name, format_spec, conversion in parts:
+            if field_name is None:
+                continue
+            if not field_name or field_name not in variables:
+                raise UserError(
+                    'Unknown backup name template variable {%s}. '
+                    'Available variables: {database}, {timestamp}, {job}, '
+                    '{format}, {config}.' % field_name
+                )
+            if format_spec or conversion:
+                raise UserError(
+                    'Backup name template variables do not support format '
+                    'specifiers or conversions.'
+                )
+            field_names.add(field_name)
+
         filename = template.format(**variables)
-        
-        # Sanitize filename
-        filename = self._sanitize_filename(filename)
-        
-        return filename
-    
+
+        # Older configurations use the former default template without {job}.
+        # Add the uniqueness components when omitted so retries and concurrent
+        # jobs cannot overwrite one another at a storage provider.
+        suffix = []
+        if 'timestamp' not in field_names:
+            suffix.append(timestamp)
+        if 'job' not in field_names:
+            suffix.append(str(job_id))
+        if suffix:
+            stem, extension = os.path.splitext(filename)
+            filename = '%s_%s%s' % (stem, '_'.join(suffix), extension)
+
+        return self._sanitize_filename(filename)
+
     def _sanitize_filename(self, filename):
-        """Sanitize filename to be safe for all filesystems."""
-        # Remove or replace invalid characters
+        """Sanitize and validate a single backup filename."""
+        if not isinstance(filename, str) or not filename:
+            raise UserError('Backup filename must not be empty.')
+        if '\x00' in filename:
+            raise UserError('Backup filename must not contain NUL bytes.')
+        if any(ord(char) < 32 or ord(char) == 127 for char in filename):
+            raise UserError('Backup filename must not contain control characters.')
+
+        # Remove or replace invalid characters. Path separators are replaced,
+        # never stripped, so the result is always a single path component.
         filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        # Remove multiple consecutive underscores
-        filename = re.sub(r'_+', '_', filename)
-        # Trim underscores from ends
-        filename = filename.strip('_')
+        filename = filename.strip().strip('_')
+        if not filename or filename in ('.', '..'):
+            raise UserError('Backup filename must not be empty or a dot path.')
+        if len(filename.encode('utf-8')) > _FILENAME_MAX_BYTES:
+            raise UserError(
+                'Backup filename must not exceed %d bytes.' % _FILENAME_MAX_BYTES
+            )
         return filename
     
     def _create_backup_file(self, temp_dir):
@@ -371,12 +456,13 @@ class BackupJob(models.Model):
         self._log(f"Creating {self.backup_format.upper()} backup of database: {self.database_name}")
 
         backup_file_path = os.path.join(temp_dir, self.backup_filename)
+        filestore_problems = {}
         try:
             with open(backup_file_path, 'wb') as backup_file:
-                self._create_database_dump(backup_file)
+                filestore_problems = self._create_database_dump(backup_file) or {}
 
             self._log(f"Backup file created successfully: {backup_file_path}")
-            return backup_file_path
+            return backup_file_path, filestore_problems
         except Exception as e:
             raise UserError(f"Failed to create backup file: {self._format_backup_error(e)}")
 
@@ -440,8 +526,9 @@ class BackupJob(models.Model):
         self._log(f"Creating {self.backup_format} dump of database: {self.database_name}")
 
         try:
-            self._dump_db(self.database_name, stream, self.backup_format)
+            problems = self._dump_db(self.database_name, stream, self.backup_format) or {}
             self._log("Database dump created successfully")
+            return problems
         except Exception as e:
             self._log(f"Database dump failed: {str(e)}")
             raise UserError(f"Database backup failed: {str(e)}")
@@ -468,6 +555,93 @@ class BackupJob(models.Model):
             'pg_version': pg_version,
             'modules': modules,
         }
+
+    @staticmethod
+    def _validate_filestore_path(path):
+        """Validate a database filestore path before using it in a ZIP."""
+        if not isinstance(path, str) or not path:
+            raise UserError('Invalid empty filestore path in attachment metadata.')
+        if '\x00' in path or '\\' in path or ':' in path:
+            raise UserError('Invalid filestore path in attachment metadata: %r' % path)
+        if path.startswith('/') or any(part in ('', '.', '..') for part in path.split('/')):
+            raise UserError('Invalid filestore path in attachment metadata: %r' % path)
+        return path
+
+    def _get_filestore_manifest(self, cr):
+        """Return the filestore files referenced by the source database.
+
+        A missing filestore directory is valid only when the database has no
+        file-backed attachments.  The database metadata is therefore the
+        authority for deciding whether an absent or unmounted filestore is a
+        legitimate empty one or an incomplete backup source.
+        """
+        cr.execute(SQL(
+            "SELECT store_fname, file_size FROM ir_attachment "
+            "WHERE type = 'binary' AND store_fname IS NOT NULL "
+            "AND store_fname <> '' ORDER BY store_fname"
+        ))
+        expected = {}
+        invalid = []
+        for store_fname, file_size in cr.fetchall():
+            try:
+                path = self._validate_filestore_path(store_fname)
+            except UserError:
+                # A single corrupt metadata row (an external-storage style
+                # store_fname such as ``bucket://xx/yy.pdf``, say) must not make
+                # the whole database unbackupable.  Record it and keep
+                # archiving everything the metadata does describe.
+                invalid.append(str(store_fname))
+                continue
+            if not isinstance(file_size, int) or isinstance(file_size, bool) or file_size < 0:
+                invalid.append(path)
+                continue
+            if path in expected and expected[path] != file_size:
+                invalid.append(path)
+                continue
+            expected[path] = file_size
+
+        return {
+            'file_count': len(expected),
+            'total_size': sum(expected.values()),
+            'files': [
+                {'path': path, 'size': expected[path]}
+                for path in sorted(expected)
+            ],
+            'invalid_metadata': sorted(invalid),
+        }
+
+    @classmethod
+    def _parse_filestore_manifest(cls, value):
+        """Validate manifest filestore metadata and return path -> size."""
+        if not isinstance(value, dict):
+            raise UserError('Invalid filestore metadata in backup manifest.')
+        files = value.get('files')
+        file_count = value.get('file_count')
+        total_size = value.get('total_size')
+        if not isinstance(files, list):
+            raise UserError('Backup manifest is missing filestore files metadata.')
+        if not isinstance(file_count, int) or isinstance(file_count, bool) or file_count < 0:
+            raise UserError('Invalid filestore file count in backup manifest.')
+        if not isinstance(total_size, int) or isinstance(total_size, bool) or total_size < 0:
+            raise UserError('Invalid filestore total size in backup manifest.')
+
+        expected = {}
+        for entry in files:
+            if not isinstance(entry, dict):
+                raise UserError('Invalid filestore file entry in backup manifest.')
+            path = cls._validate_filestore_path(entry.get('path'))
+            size = entry.get('size')
+            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+                raise UserError('Invalid filestore file size in backup manifest.')
+            if path in expected:
+                raise UserError('Duplicate filestore path in backup manifest: %s' % path)
+            expected[path] = size
+
+        if file_count != len(expected):
+            raise UserError('Filestore file count does not match backup manifest entries.')
+        if total_size != sum(expected.values()):
+            raise UserError('Filestore total size does not match backup manifest entries.')
+        return expected
 
     def _dump_db(self, db_name, stream, backup_format='zip'):
         """Dump *db_name* into the file-like *stream*.
@@ -500,11 +674,16 @@ class BackupJob(models.Model):
             dump_dir = tempfile.mkdtemp(prefix='odoo_backup_dump_')
             self._mark_temp_dir_owner(dump_dir)
             try:
-                # Generate manifest
+                # Generate manifest, including the database's authoritative
+                # list of file-backed attachments.  The ZIP writer uses this
+                # to distinguish an empty filestore from a missing mount and to
+                # fail closed if any referenced file disappears.
                 with open(os.path.join(dump_dir, 'manifest.json'), 'w') as fh:
                     db = odoo.sql_db.db_connect(db_name)
                     with db.cursor() as cr:
-                        json.dump(self._dump_db_manifest(cr), fh, indent=4)
+                        manifest = self._dump_db_manifest(cr)
+                        manifest['filestore'] = self._get_filestore_manifest(cr)
+                        json.dump(manifest, fh, indent=4)
 
                 # Run pg_dump -> dump.sql (kept in the temp dir)
                 cmd.insert(-1, '--file=' + os.path.join(dump_dir, 'dump.sql'))
@@ -516,30 +695,76 @@ class BackupJob(models.Model):
                 )
 
                 # Build the zip directly into the output stream
-                self._write_backup_zip(stream, dump_dir, db_name)
+                return self._write_backup_zip(stream, dump_dir, db_name)
             finally:
                 self._safe_rmtree(dump_dir, label='dump_dir')
         else:
             cmd.insert(-1, '--format=c')
-            # check=True: a pg_dump failure must not be silently dumped as an
-            # empty/invalid file that then passes as a "successful" backup.
-            result = subprocess.run(
-                cmd, env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
-            stream.write(result.stdout)
+            # Stream stdout directly into the caller's file.  Capturing the
+            # whole custom dump with stdout=PIPE would require a second copy
+            # of a potentially multi-gigabyte backup in worker memory.
+            self._stream_pg_dump(cmd, env, stream)
+
+    def _stream_pg_dump(self, cmd, env, stream):
+        """Stream a custom pg_dump to *stream* with bounded stderr memory."""
+        process = subprocess.Popen(
+            cmd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        stderr = bytearray()
+
+        def read_stderr():
+            # Drain the pipe continuously so pg_dump cannot deadlock when its
+            # diagnostics exceed the OS pipe buffer.  Keep only a bounded
+            # tail for the eventual error message.
+            while True:
+                chunk = process.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr.extend(chunk)
+                if len(stderr) > _PG_STDERR_LIMIT:
+                    del stderr[:-_PG_STDERR_LIMIT]
+
+        reader = threading.Thread(
+            target=read_stderr, name='backup-pg-dump-stderr', daemon=True,
+        )
+        reader.start()
+        try:
+            shutil.copyfileobj(process.stdout, stream, length=1024 * 1024)
+        except Exception:
+            # A failed output stream must not leave pg_dump blocked on a full
+            # pipe.  Preserve the original write error after reaping it.
+            try:
+                process.kill()
+            except OSError:
+                pass
+            process.wait()
+            raise
+        finally:
+            process.stdout.close()
+            reader.join()
+            process.stderr.close()
+
+        returncode = process.wait()
+        if returncode:
+            detail = stderr.decode('utf-8', errors='replace').strip()
+            if detail:
+                raise UserError(
+                    'pg_dump failed with exit code %d: %s'
+                    % (returncode, detail)
+                )
+            raise UserError('pg_dump failed with exit code %d.' % returncode)
 
     def _write_backup_zip(self, stream, dump_dir, db_name):
         """Write a restore-compatible backup zip into *stream*.
 
-        Layout matches Odoo's ``dump_db`` exactly so the archive restores
-        through the standard path: ``dump.sql`` first (so a restore can read it
-        without scanning the whole archive — the ordering Odoo's ``fnct_sort``
-        guarantees), then ``manifest.json``, then the filestore under
-        ``filestore/``. Unlike ``dump_db`` the filestore is read from its live
+        Layout matches Odoo's ``dump_db`` so the archive restores through the
+        standard path: ``dump.sql`` is first (so a restore can read it without
+        scanning the whole archive), followed by the filestore and finally the
+        manifest.  Unlike ``dump_db`` the filestore is read from its live
         location instead of a temp copy.
 
         Compression strategy: dump.sql and manifest.json are DEFLATEd (text,
@@ -555,36 +780,120 @@ class BackupJob(models.Model):
         ZIP32 limit.
         """
         filestore = odoo.tools.config.filestore(db_name)
+        if os.path.islink(filestore):
+            raise UserError('Filestore root is an unsupported symbolic link: %s' % filestore)
+        with open(os.path.join(dump_dir, 'manifest.json')) as manifest_file:
+            manifest = json.load(manifest_file)
+        filestore_metadata = manifest.get('filestore')
+        expected = (
+            self._parse_filestore_manifest(filestore_metadata)
+            if filestore_metadata is not None else None
+        )
+
         with zipfile.ZipFile(
             stream, 'w', compression=zipfile.ZIP_STORED, allowZip64=True,
         ) as zf:
+            # dump.sql must remain first for Odoo's restore fast path.  The
+            # manifest is written after the filestore walk so it describes
+            # exactly the entries that were archived, including harmless
+            # orphan files left behind by attachment garbage collection.
             zf.write(
                 os.path.join(dump_dir, 'dump.sql'), 'dump.sql',
                 compress_type=zipfile.ZIP_DEFLATED,
             )
+
+            if expected and not os.path.isdir(filestore):
+                raise UserError(
+                    'Filestore directory is missing or unmounted, but the '
+                    'database references %d filestore file(s): %s'
+                    % (len(expected), filestore)
+                )
+
+            archived = {}
+            if os.path.exists(filestore):
+
+                def raise_walk_error(error):
+                    # os.walk otherwise suppresses permission and I/O errors,
+                    # turning an unreadable subtree into a silently partial ZIP.
+                    raise error
+
+                for dirpath, dirnames, filenames in os.walk(
+                    filestore, onerror=raise_walk_error,
+                ):
+                    dirnames.sort()
+                    for fname in sorted(filenames):
+                        fpath = os.path.join(dirpath, fname)
+                        relative = os.path.relpath(fpath, filestore).replace(os.sep, '/')
+                        self._validate_filestore_path(relative)
+                        if os.path.islink(fpath):
+                            raise UserError(
+                                'Filestore contains an unsupported symbolic link: %s'
+                                % fpath
+                            )
+                        file_stat = os.stat(fpath)
+                        if not stat.S_ISREG(file_stat.st_mode):
+                            raise UserError('Filestore entry is not a regular file: %s' % fpath)
+                        arcname = 'filestore/' + relative
+                        try:
+                            zf.write(fpath, arcname)
+                        except FileNotFoundError:
+                            # Removed between the walk and the read (attachment
+                            # GC).  The manifest names it as a missing file and
+                            # the job ends as ``warning`` instead of losing the
+                            # whole backup to one vanished attachment.
+                            continue
+                        archived[relative] = file_stat.st_size
+
+            problems = {}
+            database_filestore_metadata = filestore_metadata or {}
+            if expected is not None:
+                # A missing attachment file is the database's own condition (GC
+                # orphans, an attachment whose bytes never landed), not a reason
+                # to hand the customer no backup at all: archive what exists,
+                # list the rest in the manifest and let the job finish as
+                # ``warning``.  Only an absent/unmounted filestore root (handled
+                # above) and structural errors (symlink, unreadable tree, walk
+                # error) still fail the backup.
+                missing = sorted(set(expected) - set(archived))
+                wrong_size = sorted(
+                    path for path in expected
+                    if path in archived and archived[path] != expected[path]
+                )
+                invalid_metadata = list(database_filestore_metadata.get('invalid_metadata') or [])
+                if missing:
+                    problems['missing_files'] = missing
+                if wrong_size:
+                    problems['size_mismatch'] = wrong_size
+                if invalid_metadata:
+                    problems['invalid_metadata'] = invalid_metadata
+                if problems:
+                    self._log(
+                        'Filestore archived partially: %d missing, %d size mismatch, '
+                        '%d unusable metadata row(s); backup continues as warning'
+                        % (len(missing), len(wrong_size), len(invalid_metadata))
+                    )
+
+            filestore_metadata = {
+                'file_count': len(archived),
+                'total_size': sum(archived.values()),
+                'files': [
+                    {'path': path, 'size': archived[path]}
+                    for path in sorted(archived)
+                ],
+            }
+            if expected is not None:
+                filestore_metadata['database_file_count'] = len(expected)
+                filestore_metadata['database_total_size'] = sum(expected.values())
+                filestore_metadata.update(problems)
+            manifest['filestore'] = filestore_metadata
+            manifest_path = os.path.join(dump_dir, 'manifest.json')
+            with open(manifest_path, 'w') as manifest_file:
+                json.dump(manifest, manifest_file, indent=4)
             zf.write(
-                os.path.join(dump_dir, 'manifest.json'), 'manifest.json',
+                manifest_path, 'manifest.json',
                 compress_type=zipfile.ZIP_DEFLATED,
             )
-            if not os.path.exists(filestore):
-                return
-            for dirpath, _dirnames, filenames in os.walk(filestore):
-                for fname in filenames:
-                    fpath = os.path.join(dirpath, fname)
-                    arcname = os.path.join(
-                        'filestore', os.path.relpath(fpath, filestore),
-                    )
-                    try:
-                        zf.write(fpath, arcname)
-                    except FileNotFoundError:
-                        # The attachment was unlinked (gc/vacuum) between
-                        # os.walk listing it and us reading it. It is no longer
-                        # referenced, so skipping keeps the archive consistent
-                        # with the freshly dumped database.
-                        _logger.warning(
-                            "Skipping filestore file removed mid-backup: %s",
-                            fpath,
-                        )
+        return problems
     
     def _verify_backup_integrity(self, backup_file_path):
         """Verify backup file integrity."""
@@ -637,20 +946,90 @@ class BackupJob(models.Model):
                     manifest = json.loads(manifest_file.read().decode())
                     if manifest.get('db_name') != self.database_name:
                         raise UserError("Manifest database name mismatch")
+
+                filestore_metadata = manifest.get('filestore')
+                if filestore_metadata is not None:
+                    expected = self._parse_filestore_manifest(filestore_metadata)
+                    archived = {}
+                    for info in zip_file.infolist():
+                        if not info.filename.startswith('filestore/') or info.is_dir():
+                            continue
+                        path = self._validate_filestore_path(
+                            info.filename[len('filestore/'):]
+                        )
+                        if path in archived:
+                            raise UserError('Duplicate filestore entry in ZIP: %s' % path)
+                        archived[path] = info.file_size
+
+                    if len(archived) != filestore_metadata['file_count']:
+                        raise UserError(
+                            'ZIP filestore count mismatch: expected %d, found %d'
+                            % (filestore_metadata['file_count'], len(archived))
+                        )
+                    missing = sorted(set(expected) - set(archived))
+                    if missing:
+                        raise UserError(
+                            'ZIP backup is missing expected filestore file(s): %s'
+                            % ', '.join(missing[:10])
+                        )
+                    unexpected = sorted(set(archived) - set(expected))
+                    if unexpected:
+                        raise UserError(
+                            'ZIP backup contains unexpected filestore file(s): %s'
+                            % ', '.join(unexpected[:10])
+                        )
+                    wrong_size = [
+                        path for path in expected
+                        if archived[path] != expected[path]
+                    ]
+                    if wrong_size:
+                        raise UserError(
+                            'ZIP filestore file size mismatch for: %s'
+                            % ', '.join(sorted(wrong_size)[:10])
+                        )
         except zipfile.BadZipFile:
             raise UserError("Backup file is not a valid ZIP archive")
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise UserError("Invalid manifest in ZIP backup: %s" % e)
     
     def _verify_dump_backup(self, backup_file_path):
-        """Verify PostgreSQL dump backup integrity."""
-        # For dump files, we can try to parse the header
+        """Verify a PostgreSQL custom dump with ``pg_restore --list``."""
         try:
             with open(backup_file_path, 'rb') as f:
                 header = f.read(5)
-                # PostgreSQL custom format dumps start with 'PGDMP'
+                # PostgreSQL custom format dumps start with 'PGDMP'.  This is
+                # only a cheap pre-check; pg_restore below validates the
+                # archive structure and table of contents.
                 if header != b'PGDMP':
                     raise UserError("File is not a valid PostgreSQL dump")
+
+            with tempfile.TemporaryFile() as stderr_file:
+                result = subprocess.run(
+                    [find_pg_tool('pg_restore'), '--list', backup_file_path],
+                    env=exec_pg_environ(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr_file,
+                    check=False,
+                )
+                if result.returncode:
+                    stderr_file.seek(0, os.SEEK_END)
+                    size = stderr_file.tell()
+                    stderr_file.seek(max(0, size - _PG_STDERR_LIMIT))
+                    detail = stderr_file.read(_PG_STDERR_LIMIT).decode(
+                        'utf-8', errors='replace',
+                    ).strip()
+                    raise UserError(
+                        'pg_restore --list failed with exit code %d%s'
+                        % (
+                            result.returncode,
+                            ': %s' % detail if detail else '.',
+                        )
+                    )
+        except UserError:
+            raise
         except Exception as e:
-            raise UserError(f"Failed to verify dump file: {e}")
+            raise UserError("Failed to verify dump file: %s" % e)
     
     def _preflight_database(self):
         """Raise before the dump when the configured database is missing.
@@ -729,20 +1108,41 @@ class BackupJob(models.Model):
 
         return self._upload_to_providers_sequential(backup_file_path, providers)
 
+    @staticmethod
+    def _decode_encryption_key(key_raw):
+        """Decode and validate a base64-encoded AES-256 key."""
+        import base64
+        try:
+            key = base64.b64decode(key_raw, validate=True)
+        except Exception as e:
+            raise UserError('Invalid encryption key (not valid base64): %s' % e)
+        if len(key) != 32:
+            raise UserError(
+                'Encryption key must be exactly 32 bytes '
+                '(got %d bytes after base64 decode).' % len(key)
+            )
+        return key
+
+    @classmethod
+    def _validate_encryption_chunk_size(cls, chunk_size):
+        if not 1 <= chunk_size <= _ENCRYPTION_CHUNK_SIZE:
+            raise UserError(
+                'Invalid encrypted chunk size %d; expected a value between '
+                '1 and %d bytes.' % (chunk_size, _ENCRYPTION_CHUNK_SIZE)
+            )
+
     def _encrypt_backup_file(self, backup_file_path):
-        """Encrypt the backup file with AES-256-GCM.
+        """Encrypt the backup file with authenticated AES-256-GCM chunks.
 
-        The encryption key is read from the backup config. The encrypted file
-        is written to a sibling path with a ``.enc`` suffix, and the caller
-        (``_upload_to_providers``) uploads the encrypted one. The original
-        unencrypted file is left in place for the caller's cleanup.
+        Version 2 layout::
 
-        Encrypted file format::
+            [5B magic "BVENC"][1B version=2][4B LE chunk_size][8B LE chunks]
+            [repeat: 8B LE index][12B nonce][4B LE ct_len][N B ciphertext]
 
-            [4B LE chunk_size][repeat: 12B nonce][4B LE ct_len][N B ct]
-
-        Returns:
-            str: Path to the encrypted backup file.
+        The AAD binds the format prefix, chunk size, chunk index, total chunk
+        count and final-chunk flag.  Reordering, duplicating, removing or
+        appending chunks therefore fails authentication instead of producing a
+        plausible but incomplete plaintext file.
         """
         if not CRYPTOGRAPHY_AVAILABLE:
             raise UserError(
@@ -758,100 +1158,210 @@ class BackupJob(models.Model):
                 '"Generate Encryption Key".'
             )
 
-        import base64
-        try:
-            key = base64.b64decode(key_raw)
-        except Exception as e:
-            raise UserError('Invalid encryption key (not valid base64): %s' % e)
-
-        if len(key) != 32:
-            raise UserError(
-                'Encryption key must be exactly 32 bytes '
-                '(got %d bytes after base64 decode).' % len(key)
-            )
-
-        enc_path = backup_file_path + '.enc'
-        chunk_size = 16 * 1024 * 1024  # 16 MB
-        nonce_len = 12
+        key = self._decode_encryption_key(key_raw)
         aesgcm = AESGCM(key)
+        chunk_size = _ENCRYPTION_CHUNK_SIZE
+        enc_path = backup_file_path + '.enc'
+        output_dir = os.path.dirname(os.path.abspath(enc_path))
+        fd, temp_path = tempfile.mkstemp(prefix='.bv_encrypt_', dir=output_dir)
 
         self._log('Encrypting backup with AES-256-GCM')
         try:
-            with open(backup_file_path, 'rb') as fin, \
-                 open(enc_path, 'wb') as fout:
-                # Write chunk_size as 4-byte LE for the decryptor
-                fout.write(chunk_size.to_bytes(4, 'little'))
+            with os.fdopen(fd, 'wb') as fout:
+                fd = None
+                with open(backup_file_path, 'rb') as fin:
+                    source_size = os.fstat(fin.fileno()).st_size
+                    bytes_read = 0
+                    total_chunks = max(
+                        1, (source_size + chunk_size - 1) // chunk_size,
+                    )
+                    fout.write(_ENCRYPTION_V2_HEADER.pack(
+                        _ENCRYPTION_MAGIC,
+                        _ENCRYPTION_VERSION,
+                        chunk_size,
+                        total_chunks,
+                    ))
 
-                while True:
-                    chunk = fin.read(chunk_size)
-                    if not chunk:
-                        break
-                    nonce = os.urandom(nonce_len)
-                    ct = aesgcm.encrypt(nonce, chunk, None)
-                    fout.write(nonce)         # 12 B
-                    fout.write(len(ct).to_bytes(4, 'little'))  # 4 B
-                    fout.write(ct)            # N B
+                    for index in range(total_chunks):
+                        chunk = fin.read(chunk_size)
+                        bytes_read += len(chunk)
+                        final = index == total_chunks - 1
+                        if not final and len(chunk) != chunk_size:
+                            raise UserError('Backup file changed while encrypting.')
+                        nonce = os.urandom(_ENCRYPTION_NONCE_SIZE)
+                        aad = _ENCRYPTION_V2_PREFIX + _ENCRYPTION_AAD.pack(
+                            index, chunk_size, total_chunks, int(final),
+                        )
+                        ciphertext = aesgcm.encrypt(nonce, chunk, aad)
+                        fout.write(_ENCRYPTION_CHUNK_INDEX.pack(index))
+                        fout.write(nonce)
+                        fout.write(len(ciphertext).to_bytes(4, 'little'))
+                        fout.write(ciphertext)
+
+                    if fin.read(1):
+                        raise UserError('Backup file changed while encrypting.')
+                    if bytes_read != source_size:
+                        raise UserError('Backup file changed while encrypting.')
+                fout.flush()
+                os.fsync(fout.fileno())
+            os.replace(temp_path, enc_path)
         except Exception as e:
-            if os.path.exists(enc_path):
-                os.unlink(enc_path)
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            if isinstance(e, UserError):
+                raise
             raise UserError('Encryption failed: %s' % e)
 
         self._log('Encryption complete: %s' % enc_path)
         return enc_path
 
     @staticmethod
+    def _decrypt_v2(fin, fout, aesgcm):
+        """Decrypt and strictly validate a version-2 encrypted stream."""
+        header = fin.read(_ENCRYPTION_V2_HEADER.size)
+        if len(header) != _ENCRYPTION_V2_HEADER.size:
+            raise UserError('Truncated encrypted file header.')
+        magic, version, chunk_size, total_chunks = _ENCRYPTION_V2_HEADER.unpack(header)
+        if magic != _ENCRYPTION_MAGIC or version != _ENCRYPTION_VERSION:
+            raise UserError('Unsupported encrypted backup format.')
+        BackupJob._validate_encryption_chunk_size(chunk_size)
+        if total_chunks < 1:
+            raise UserError('Encrypted backup has an invalid chunk count.')
+
+        file_size = os.fstat(fin.fileno()).st_size
+        min_chunk_wire_size = (
+            _ENCRYPTION_CHUNK_INDEX.size
+            + _ENCRYPTION_NONCE_SIZE
+            + 4
+            + _ENCRYPTION_TAG_SIZE
+        )
+        max_chunk_wire_size = min_chunk_wire_size + chunk_size
+        minimum_size = _ENCRYPTION_V2_HEADER.size + total_chunks * min_chunk_wire_size
+        maximum_size = _ENCRYPTION_V2_HEADER.size + total_chunks * max_chunk_wire_size
+        if not minimum_size <= file_size <= maximum_size:
+            raise UserError('Encrypted backup length does not match its chunk count.')
+
+        for expected_index in range(total_chunks):
+            index_bytes = fin.read(_ENCRYPTION_CHUNK_INDEX.size)
+            if len(index_bytes) != _ENCRYPTION_CHUNK_INDEX.size:
+                raise UserError('Truncated chunk index in encrypted file.')
+            index = _ENCRYPTION_CHUNK_INDEX.unpack(index_bytes)[0]
+            if index != expected_index:
+                raise UserError(
+                    'Encrypted backup chunk order mismatch: expected %d, found %d.'
+                    % (expected_index, index)
+                )
+
+            nonce = fin.read(_ENCRYPTION_NONCE_SIZE)
+            if len(nonce) != _ENCRYPTION_NONCE_SIZE:
+                raise UserError('Truncated nonce in encrypted file.')
+            ct_len_bytes = fin.read(4)
+            if len(ct_len_bytes) != 4:
+                raise UserError('Truncated ciphertext length.')
+            ct_len = int.from_bytes(ct_len_bytes, 'little')
+            final = index == total_chunks - 1
+            if ct_len < _ENCRYPTION_TAG_SIZE or ct_len > chunk_size + _ENCRYPTION_TAG_SIZE:
+                raise UserError('Invalid ciphertext length in encrypted file.')
+            if not final and ct_len != chunk_size + _ENCRYPTION_TAG_SIZE:
+                raise UserError('Non-final encrypted chunk has an invalid length.')
+
+            ciphertext = fin.read(ct_len)
+            if len(ciphertext) != ct_len:
+                raise UserError('Truncated ciphertext.')
+            aad = _ENCRYPTION_V2_PREFIX + _ENCRYPTION_AAD.pack(
+                index, chunk_size, total_chunks, int(final),
+            )
+            plaintext = aesgcm.decrypt(nonce, ciphertext, aad)
+            if not final and len(plaintext) != chunk_size:
+                raise UserError('Non-final encrypted chunk has an invalid plaintext size.')
+            fout.write(plaintext)
+
+        if fin.read(1):
+            raise UserError('Trailing data after the final encrypted chunk.')
+
+    @staticmethod
+    def _decrypt_v1(fin, fout, aesgcm):
+        """Decrypt the legacy unauthenticated chunk format when possible."""
+        chunk_size_bytes = fin.read(4)
+        if len(chunk_size_bytes) != 4:
+            raise UserError('Truncated encrypted file.')
+        chunk_size = int.from_bytes(chunk_size_bytes, 'little')
+        BackupJob._validate_encryption_chunk_size(chunk_size)
+
+        while True:
+            nonce = fin.read(_ENCRYPTION_NONCE_SIZE)
+            if not nonce:
+                break
+            if len(nonce) != _ENCRYPTION_NONCE_SIZE:
+                raise UserError('Truncated nonce in encrypted file.')
+            ct_len_bytes = fin.read(4)
+            if len(ct_len_bytes) != 4:
+                raise UserError('Truncated ciphertext length.')
+            ct_len = int.from_bytes(ct_len_bytes, 'little')
+            if not _ENCRYPTION_TAG_SIZE <= ct_len <= chunk_size + _ENCRYPTION_TAG_SIZE:
+                raise UserError('Invalid ciphertext length in encrypted file.')
+            ciphertext = fin.read(ct_len)
+            if len(ciphertext) != ct_len:
+                raise UserError('Truncated ciphertext.')
+            fout.write(aesgcm.decrypt(nonce, ciphertext, None))
+
+    @staticmethod
     def decrypt_backup_file(enc_path, output_path, key_raw):
-        """Decrypt a backup file that was encrypted with ``_encrypt_backup_file``.
+        """Decrypt a backup into *output_path* atomically.
 
-        This is a static method so the restore wizard can call it without
-        a job record.
-
-        Args:
-            enc_path: Path to the ``.enc`` file.
-            output_path: Where to write the decrypted output.
-            key_raw: Base64-encoded 32-byte AES-256 key.
-
-        Returns:
-            str: ``output_path`` on success.
+        Version 2 is fully authenticated.  The legacy version-1 format remains
+        readable for existing backups, but cannot provide chunk reordering or
+        truncation detection because it did not authenticate chunk metadata.
+        A failed decryption never replaces or leaves a partial output file.
         """
         if not CRYPTOGRAPHY_AVAILABLE:
             raise UserError('Decryption requires ``cryptography`` package.')
 
-        import base64
-        try:
-            key = base64.b64decode(key_raw)
-        except Exception as e:
-            raise UserError('Invalid key: %s' % e)
-
-        if len(key) != 32:
-            raise UserError('Key must be 32 bytes.')
-
+        key = BackupJob._decode_encryption_key(key_raw)
         aesgcm = AESGCM(key)
+        output_dir = os.path.dirname(os.path.abspath(output_path))
+        fd, temp_path = tempfile.mkstemp(prefix='.bv_decrypt_', dir=output_dir)
 
-        with open(enc_path, 'rb') as fin, open(output_path, 'wb') as fout:
-            chunk_size_bytes = fin.read(4)
-            if len(chunk_size_bytes) < 4:
-                raise UserError('Truncated encrypted file.')
-            chunk_size = int.from_bytes(chunk_size_bytes, 'little')
-
-            while True:
-                nonce = fin.read(12)
-                if not nonce:
-                    break
-                if len(nonce) < 12:
-                    raise UserError('Truncated nonce in encrypted file.')
-                ct_len_bytes = fin.read(4)
-                if len(ct_len_bytes) < 4:
-                    raise UserError('Truncated ciphertext length.')
-                ct_len = int.from_bytes(ct_len_bytes, 'little')
-                ct = fin.read(ct_len)
-                if len(ct) < ct_len:
-                    raise UserError('Truncated ciphertext.')
-                plain = aesgcm.decrypt(nonce, ct, None)
-                fout.write(plain)
+        try:
+            with os.fdopen(fd, 'wb') as fout:
+                fd = None
+                with open(enc_path, 'rb') as fin:
+                    prefix = fin.read(len(_ENCRYPTION_V2_PREFIX))
+                    fin.seek(0)
+                    if prefix == _ENCRYPTION_V2_PREFIX:
+                        BackupJob._decrypt_v2(fin, fout, aesgcm)
+                    elif prefix.startswith(_ENCRYPTION_MAGIC):
+                        raise UserError('Unsupported encrypted backup version.')
+                    else:
+                        BackupJob._decrypt_v1(fin, fout, aesgcm)
+                fout.flush()
+                os.fsync(fout.fileno())
+            os.replace(temp_path, output_path)
+        except Exception:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise
 
         return output_path
     
+    @staticmethod
+    def _provider_result_key_for(provider):
+        """Canonical provider key, tolerating providers without the helper."""
+        helper = getattr(provider, '_provider_result_key', None)
+        if callable(helper):
+            return helper()
+        return '%s:%s' % (provider._name, provider.id)
+
     def _upload_to_providers_sequential(self, backup_file_path, providers):
         """Upload to providers sequentially."""
         results = {}
@@ -863,7 +1373,26 @@ class BackupJob(models.Model):
             
             try:
                 result = provider.upload_backup(backup_file_path, self.backup_filename)
-                results[provider.name] = result
+                if result.get('success') and self.config_id and self.backup_filename:
+                    # Artifact rows are the durable ownership proof retention
+                    # relies on; an unsaved job (shell or test call) has neither
+                    # config nor filename and must not create a row.
+                    metadata = result.get('metadata') or {}
+                    artifact = self.env['backup.artifact'].create({
+                        'job_id': self.id,
+                        'config_id': self.config_id.id,
+                        'provider_model': provider._name,
+                        'provider_id': provider.id,
+                        'filename': self.backup_filename,
+                        'object_path': (
+                            metadata.get('file_path')
+                            or metadata.get('remote_path')
+                            or ''
+                        ),
+                        'size_bytes': metadata.get('size_bytes') or False,
+                    })
+                    result['artifact_id'] = artifact.id
+                results[self._provider_result_key_for(provider)] = result
                 
                 if result.get('success'):
                     self._log(f"Upload to {label} successful")
@@ -872,7 +1401,7 @@ class BackupJob(models.Model):
             except Exception as e:
                 error_msg = f"Upload to {label} failed with exception: {e}"
                 self._log(error_msg)
-                results[provider.name] = {
+                results[self._provider_result_key_for(provider)] = {
                     'success': False,
                     'message': str(e),
                     'metadata': {}
@@ -995,15 +1524,16 @@ class BackupJob(models.Model):
         - it is older than ``max_age_seconds``, and
         - its owner marker (the PID of the process that created it) does not
           name a live process — so a backup that legitimately runs for many
-          hours is never swept out from under the worker writing to it, and
-        - or, regardless of the owner, it is older than
-          ``hard_max_age_seconds`` (caps leakage if a recycled PID happens to
-          match an unrelated live process).
+          hours is never swept out from under the worker writing to it.
+
+        ``hard_max_age_seconds`` is retained for caller compatibility, but it
+        never overrides a live owner marker.  Deleting an active worker's files
+        is less acceptable than retaining an abandoned directory whose PID has
+        been recycled by an unrelated process.
         """
         tmp_root = tempfile.gettempdir()
         now = time.time()
         cutoff = now - max_age_seconds
-        hard_cutoff = now - hard_max_age_seconds
         removed = []
         for prefix in cls._TEMP_DIR_PREFIXES:
             for path in glob.glob(os.path.join(tmp_root, prefix + '*')):
@@ -1011,12 +1541,8 @@ class BackupJob(models.Model):
                     mtime = os.path.getmtime(path)
                     if mtime >= cutoff:
                         continue  # recent — likely an in-progress backup
-                    if (
-                        os.path.isdir(path)
-                        and mtime >= hard_cutoff
-                        and cls._temp_dir_owner_alive(path)
-                    ):
-                        continue  # long-running backup still owned by a live process
+                    if os.path.isdir(path) and cls._temp_dir_owner_alive(path):
+                        continue  # never delete a live owner's directory
                     if os.path.isdir(path):
                         shutil.rmtree(path, ignore_errors=True)
                     else:

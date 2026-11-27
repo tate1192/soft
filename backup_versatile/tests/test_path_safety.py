@@ -70,15 +70,18 @@ class TestPathSafety(TransactionCase):
     def test_cloud_remote_path_normal(self):
         self.assertEqual(
             self._cloud()._remote_path('backup.zip'),
-            's3:mybucket/backup.zip',
+            ':s3:mybucket/backup.zip',
         )
 
-    def test_cloud_remote_path_traversal_neutralized(self):
-        """Regression (P0 #4): cloud remote path strips traversal to basename."""
+    def test_cloud_nested_object_key_is_preserved(self):
         self.assertEqual(
-            self._cloud()._remote_path('../../etc/passwd'),
-            's3:mybucket/passwd',
+            self._cloud()._remote_path('daily/backup.zip'),
+            ':s3:mybucket/daily/backup.zip',
         )
+
+    def test_cloud_remote_path_traversal_rejected(self):
+        with self.assertRaises(UserError):
+            self._cloud()._remote_path('../../etc/passwd')
 
     def test_cloud_remote_path_dotdot_rejected(self):
         with self.assertRaises(UserError):

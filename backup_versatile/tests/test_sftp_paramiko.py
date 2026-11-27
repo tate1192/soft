@@ -239,24 +239,63 @@ class TestSftpParamikoProvider(TransactionCase):
         self.assertFalse(result['success'])
         self.assertIn('Upload verification failed', result['message'])
         sftp.put.assert_called_once()
+        part_path = sftp.put.call_args.args[1]
+        self.assertTrue(part_path.endswith('.part'))
+        self.assertNotEqual(part_path, '/home/backups/db.zip')
+        sftp.chmod.assert_called_once_with(part_path, 0o600)
+        sftp.remove.assert_called_once_with(part_path)
+        sftp.rename.assert_not_called()
 
-    def test_upload_preserves_permissions_and_reports_metadata(self):
-        provider = self._provider()
+    def test_upload_sets_owner_only_permissions_and_renames_to_final(self):
+        provider = self._provider(preserve_file_permissions=False)
         with tempfile.NamedTemporaryFile(suffix='.zip') as local:
             local.write(b'y' * 64)
             local.flush()
             os.chmod(local.name, 0o640)
-            expected_mode = os.stat(local.name).st_mode
             sftp = MagicMock()
-            sftp.stat.return_value = MagicMock(st_size=64, st_mode=0o100640)
+            sftp.stat.return_value = MagicMock(st_size=64, st_mode=0o100600)
             with self._use_session(sftp):
                 result = provider.upload_backup(local.name, 'db.zip')
-            self.assertTrue(result['success'])
+            self.assertTrue(result['success'], result['message'])
             self.assertEqual(result['metadata']['size_bytes'], 64)
-            self.assertEqual(result['metadata']['permissions'], '0o100640')
+            self.assertEqual(result['metadata']['permissions'], '0o600')
             self.assertEqual(result['metadata']['remote_path'], '/home/backups/db.zip')
-            sftp.chmod.assert_called_once_with('/home/backups/db.zip', expected_mode)
-            sftp.put.assert_called_once()
+            part_path = sftp.put.call_args.args[1]
+            self.assertTrue(part_path.endswith('.part'))
+            self.assertNotEqual(part_path, '/home/backups/db.zip')
+            sftp.chmod.assert_called_once_with(part_path, 0o600)
+            sftp.rename.assert_called_once_with(part_path, '/home/backups/db.zip')
+            sftp.remove.assert_not_called()
+
+    def test_upload_rename_failure_cleans_partial(self):
+        provider = self._provider()
+        with tempfile.NamedTemporaryFile(suffix='.zip') as local:
+            local.write(b'z' * 32)
+            local.flush()
+            sftp = MagicMock()
+            sftp.stat.return_value = MagicMock(st_size=32, st_mode=0o100600)
+            sftp.rename.side_effect = IOError('simulated rename failure')
+            with self._use_session(sftp):
+                result = provider.upload_backup(local.name, 'db.zip')
+        self.assertFalse(result['success'])
+        part_path = sftp.put.call_args.args[1]
+        sftp.remove.assert_called_once_with(part_path)
+
+    def test_upload_uses_unique_partial_names(self):
+        provider = self._provider()
+        with tempfile.NamedTemporaryFile(suffix='.zip') as local:
+            local.write(b'z' * 32)
+            local.flush()
+            sftp = MagicMock()
+            sftp.stat.return_value = MagicMock(st_size=32, st_mode=0o100600)
+            with self._use_session(sftp):
+                first = provider.upload_backup(local.name, 'db.zip')
+                second = provider.upload_backup(local.name, 'db.zip')
+        self.assertTrue(first['success'], first['message'])
+        self.assertTrue(second['success'], second['message'])
+        first_part = sftp.put.call_args_list[0].args[1]
+        second_part = sftp.put.call_args_list[1].args[1]
+        self.assertNotEqual(first_part, second_part)
 
     def test_download_missing_remote_file(self):
         provider = self._provider()
