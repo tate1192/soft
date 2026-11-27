@@ -9,3 +9,4 @@ from . import test_sftp_paramiko
 from . import test_provider_preflight
 from . import test_database_preflight
 from . import test_rpc_security
+from . import test_backup_integrity
