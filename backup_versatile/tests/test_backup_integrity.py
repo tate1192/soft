@@ -187,13 +187,23 @@ class TestBackupIntegrity(TransactionCase):
             with self.assertRaisesRegex(UserError, 'symbolic link'):
                 self._write_archive(root, dump_dir, link)
 
-    def test_incomplete_filestore_is_rejected(self):
+    def test_incomplete_filestore_is_archived_and_reported(self):
         expected = {'aa/one': b'one', 'bb/two': b'two'}
         with tempfile.TemporaryDirectory() as root:
             dump_dir = self._prepare_dump(root, expected)
             filestore = self._materialize_filestore(root, {'aa/one': b'one'})
-            with self.assertRaisesRegex(UserError, 'missing 1 expected filestore'):
-                self._write_archive(root, dump_dir, filestore)
+            output = io.BytesIO()
+            with patch.object(backup_job_module.odoo.tools.config, 'filestore', return_value=filestore):
+                problems = self.job._write_backup_zip(output, dump_dir, 'test_db')
+            archive = output.getvalue()
+            self._verify_archive_bytes(archive)
+            with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+                manifest = json.loads(zf.read('manifest.json'))
+            metadata = manifest['filestore']
+            self.assertEqual(metadata['file_count'], 1)
+            self.assertEqual(metadata['database_file_count'], 2)
+            self.assertEqual(metadata['missing_files'], ['bb/two'])
+            self.assertEqual(problems['missing_files'], ['bb/two'])
 
     def test_unreferenced_filestore_files_are_archived_and_counted(self):
         expected = {'aa/one': b'one'}
@@ -241,7 +251,7 @@ class TestBackupIntegrity(TransactionCase):
                 with self.assertRaises(PermissionError):
                     self.job._write_backup_zip(io.BytesIO(), dump_dir, 'test_db')
 
-    def test_filestore_file_removed_during_archive_is_not_skipped(self):
+    def test_filestore_file_removed_during_archive_is_reported_missing(self):
         files = {'aa/one': b'one'}
         with tempfile.TemporaryDirectory() as root:
             dump_dir = self._prepare_dump(root, files)
@@ -253,10 +263,12 @@ class TestBackupIntegrity(TransactionCase):
                     os.unlink(filename)
                 return original_write(zf, filename, *args, **kwargs)
 
+            output = io.BytesIO()
             with patch.object(backup_job_module.odoo.tools.config, 'filestore', return_value=filestore), \
                     patch.object(zipfile.ZipFile, 'write', remove_filestore):
-                with self.assertRaises(FileNotFoundError):
-                    self.job._write_backup_zip(io.BytesIO(), dump_dir, 'test_db')
+                problems = self.job._write_backup_zip(output, dump_dir, 'test_db')
+            # The archive is written and names the file it could not archive.
+            self.assertEqual(problems['missing_files'], ['aa/one'])
 
     def test_zip_verification_rejects_filestore_count_mismatch(self):
         manifest = {
@@ -291,10 +303,32 @@ class TestBackupIntegrity(TransactionCase):
             ('bb/two', 4),
         ]
         manifest = self.job._get_filestore_manifest(cursor)
-        self.assertEqual(manifest, self._filestore_manifest({
-            'aa/one': b'one', 'bb/two': b'two!',
-        }))
+        self.assertEqual(manifest, dict(
+            self._filestore_manifest({'aa/one': b'one', 'bb/two': b'two!'}),
+            invalid_metadata=[],
+        ))
         cursor.execute.assert_called_once()
+
+    def test_unusable_attachment_metadata_is_recorded_not_fatal(self):
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [
+            ('aa/one', 3),
+            ('bucket://xx/yy.pdf', 10),   # external-storage style store_fname
+            ('bb/two', None),             # no recorded size
+            ('cc/three', 5),
+            ('cc/three', 6),              # conflicting duplicate
+        ]
+        manifest = self.job._get_filestore_manifest(cursor)
+        # aa/one and the first cc/three row are the usable ones.
+        self.assertEqual(manifest['file_count'], 2)
+        self.assertEqual(
+            manifest['files'],
+            [{'path': 'aa/one', 'size': 3}, {'path': 'cc/three', 'size': 5}],
+        )
+        self.assertEqual(
+            manifest['invalid_metadata'],
+            sorted(['bucket://xx/yy.pdf', 'bb/two', 'cc/three']),
+        )
 
     # ------------------------------------------------------------ encryption v2
     def _require_cryptography(self):

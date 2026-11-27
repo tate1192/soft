@@ -269,7 +269,7 @@ class BackupJob(models.Model):
             self._preflight_providers()
 
             # Create backup file inside our temp dir
-            backup_file_path = self._create_backup_file(temp_dir)
+            backup_file_path, filestore_problems = self._create_backup_file(temp_dir)
 
             # Get backup file size and store as MB with sub-MB precision (Float)
             size_bytes = os.path.getsize(backup_file_path)
@@ -298,6 +298,23 @@ class BackupJob(models.Model):
                 self.status = 'warning'
                 self.error_message = f"Only {successful_uploads}/{total_providers} provider uploads succeeded"
                 success = True  # Partial success
+            elif filestore_problems:
+                # The archive is complete for every file the filestore still
+                # holds, but the database references files that are not there.
+                # Say so loudly: a warning still sends the failure notification
+                # and keeps retention from pruning the last good copies.
+                problems = filestore_problems
+                self.status = 'warning'
+                self.error_message = (
+                    'Backup stored with a partial filestore: %d missing file(s), '
+                    '%d size mismatch(es), %d unusable metadata row(s)'
+                    % (
+                        len(problems.get('missing_files') or []),
+                        len(problems.get('size_mismatch') or []),
+                        len(problems.get('invalid_metadata') or []),
+                    )
+                )
+                success = True
             else:
                 # All uploads succeeded
                 self.status = 'success'
@@ -439,12 +456,13 @@ class BackupJob(models.Model):
         self._log(f"Creating {self.backup_format.upper()} backup of database: {self.database_name}")
 
         backup_file_path = os.path.join(temp_dir, self.backup_filename)
+        filestore_problems = {}
         try:
             with open(backup_file_path, 'wb') as backup_file:
-                self._create_database_dump(backup_file)
+                filestore_problems = self._create_database_dump(backup_file) or {}
 
             self._log(f"Backup file created successfully: {backup_file_path}")
-            return backup_file_path
+            return backup_file_path, filestore_problems
         except Exception as e:
             raise UserError(f"Failed to create backup file: {self._format_backup_error(e)}")
 
@@ -508,8 +526,9 @@ class BackupJob(models.Model):
         self._log(f"Creating {self.backup_format} dump of database: {self.database_name}")
 
         try:
-            self._dump_db(self.database_name, stream, self.backup_format)
+            problems = self._dump_db(self.database_name, stream, self.backup_format) or {}
             self._log("Database dump created successfully")
+            return problems
         except Exception as e:
             self._log(f"Database dump failed: {str(e)}")
             raise UserError(f"Database backup failed: {str(e)}")
@@ -562,16 +581,23 @@ class BackupJob(models.Model):
             "AND store_fname <> '' ORDER BY store_fname"
         ))
         expected = {}
+        invalid = []
         for store_fname, file_size in cr.fetchall():
-            path = self._validate_filestore_path(store_fname)
+            try:
+                path = self._validate_filestore_path(store_fname)
+            except UserError:
+                # A single corrupt metadata row (an external-storage style
+                # store_fname such as ``bucket://xx/yy.pdf``, say) must not make
+                # the whole database unbackupable.  Record it and keep
+                # archiving everything the metadata does describe.
+                invalid.append(str(store_fname))
+                continue
             if not isinstance(file_size, int) or isinstance(file_size, bool) or file_size < 0:
-                raise UserError(
-                    'Invalid file size in attachment metadata for %s.' % path
-                )
+                invalid.append(path)
+                continue
             if path in expected and expected[path] != file_size:
-                raise UserError(
-                    'Conflicting file sizes in attachment metadata for %s.' % path
-                )
+                invalid.append(path)
+                continue
             expected[path] = file_size
 
         return {
@@ -581,6 +607,7 @@ class BackupJob(models.Model):
                 {'path': path, 'size': expected[path]}
                 for path in sorted(expected)
             ],
+            'invalid_metadata': sorted(invalid),
         }
 
     @classmethod
@@ -668,7 +695,7 @@ class BackupJob(models.Model):
                 )
 
                 # Build the zip directly into the output stream
-                self._write_backup_zip(stream, dump_dir, db_name)
+                return self._write_backup_zip(stream, dump_dir, db_name)
             finally:
                 self._safe_rmtree(dump_dir, label='dump_dir')
         else:
@@ -807,26 +834,43 @@ class BackupJob(models.Model):
                         if not stat.S_ISREG(file_stat.st_mode):
                             raise UserError('Filestore entry is not a regular file: %s' % fpath)
                         arcname = 'filestore/' + relative
-                        # Do not skip files removed after os.walk: a missing
-                        # referenced attachment makes the backup incomplete.
-                        zf.write(fpath, arcname)
+                        try:
+                            zf.write(fpath, arcname)
+                        except FileNotFoundError:
+                            # Removed between the walk and the read (attachment
+                            # GC).  The manifest names it as a missing file and
+                            # the job ends as ``warning`` instead of losing the
+                            # whole backup to one vanished attachment.
+                            continue
                         archived[relative] = file_stat.st_size
 
+            problems = {}
+            database_filestore_metadata = filestore_metadata or {}
             if expected is not None:
+                # A missing attachment file is the database's own condition (GC
+                # orphans, an attachment whose bytes never landed), not a reason
+                # to hand the customer no backup at all: archive what exists,
+                # list the rest in the manifest and let the job finish as
+                # ``warning``.  Only an absent/unmounted filestore root (handled
+                # above) and structural errors (symlink, unreadable tree, walk
+                # error) still fail the backup.
                 missing = sorted(set(expected) - set(archived))
-                if missing:
-                    raise UserError(
-                        'Backup is missing %d expected filestore file(s): %s'
-                        % (len(missing), ', '.join(missing[:10]))
-                    )
-                wrong_size = [
+                wrong_size = sorted(
                     path for path in expected
-                    if archived[path] != expected[path]
-                ]
+                    if path in archived and archived[path] != expected[path]
+                )
+                invalid_metadata = list(database_filestore_metadata.get('invalid_metadata') or [])
+                if missing:
+                    problems['missing_files'] = missing
                 if wrong_size:
-                    raise UserError(
-                        'Filestore file size mismatch for: %s'
-                        % ', '.join(sorted(wrong_size)[:10])
+                    problems['size_mismatch'] = wrong_size
+                if invalid_metadata:
+                    problems['invalid_metadata'] = invalid_metadata
+                if problems:
+                    self._log(
+                        'Filestore archived partially: %d missing, %d size mismatch, '
+                        '%d unusable metadata row(s); backup continues as warning'
+                        % (len(missing), len(wrong_size), len(invalid_metadata))
                     )
 
             filestore_metadata = {
@@ -840,6 +884,7 @@ class BackupJob(models.Model):
             if expected is not None:
                 filestore_metadata['database_file_count'] = len(expected)
                 filestore_metadata['database_total_size'] = sum(expected.values())
+                filestore_metadata.update(problems)
             manifest['filestore'] = filestore_metadata
             manifest_path = os.path.join(dump_dir, 'manifest.json')
             with open(manifest_path, 'w') as manifest_file:
@@ -848,6 +893,7 @@ class BackupJob(models.Model):
                 manifest_path, 'manifest.json',
                 compress_type=zipfile.ZIP_DEFLATED,
             )
+        return problems
     
     def _verify_backup_integrity(self, backup_file_path):
         """Verify backup file integrity."""
