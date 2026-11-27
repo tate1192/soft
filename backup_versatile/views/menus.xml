@@ -55,7 +55,7 @@
             name="Restore Backup"
             action="action_backup_restore_wizard"
             sequence="40"
-            groups="backup_versatile.group_backup_admin"
+            groups="base.group_system"
         />
 
     </menuitem>

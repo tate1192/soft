@@ -1048,6 +1048,14 @@ class BackupJob(models.Model):
         """
         self.ensure_one()
 
+        if (
+            self.database_name != self.env.cr.dbname
+            and not self.env.user.has_group('base.group_system')
+        ):
+            raise AccessDenied(
+                "Cross-database backups require system administrator rights."
+            )
+
         self.env.cr.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
             (self.database_name,))

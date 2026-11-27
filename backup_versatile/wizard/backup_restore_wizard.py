@@ -19,8 +19,8 @@ import odoo.modules.neutralize
 import odoo.modules.registry
 import odoo.sql_db
 
-from odoo import models, fields, _
-from odoo.exceptions import UserError
+from odoo import models, fields, api, _
+from odoo.exceptions import AccessDenied, UserError
 from odoo.tools import config
 from odoo.tools.misc import exec_pg_environ, find_pg_tool
 
@@ -127,6 +127,8 @@ class BackupRestoreWizard(models.TransientModel):
     )
     encryption_key = fields.Char(
         string='Encryption Key (base64)',
+        groups='backup_versatile.group_backup_admin',
+        copy=False,
         help='The AES-256 key used when the backup was created '
              '(base64-encoded, 32 bytes)',
     )
@@ -176,6 +178,13 @@ class BackupRestoreWizard(models.TransientModel):
                 'with a letter, number, or underscore.'
             ))
         return name
+
+    def _assert_system_admin(self):
+        """Restore is a server-wide operation, not a per-database privilege."""
+        if not self.env.user.has_group('base.group_system'):
+            raise AccessDenied(
+                "Database restore requires system administrator rights."
+            )
 
     def _validate_restore_options(self):
         """Reject option combinations that would destroy data."""
@@ -716,6 +725,7 @@ class BackupRestoreWizard(models.TransientModel):
     def action_restore(self):
         """Validate, restore to staging, then cut over with rollback."""
         self.ensure_one()
+        self._assert_system_admin()
 
         if not self.selected_backup:
             raise UserError(_('Please select a backup file to restore.'))
