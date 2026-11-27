@@ -26,7 +26,7 @@
         <field name="arch" type="xml">
             <form string="Backup Job" create="false" edit="false">
                 <header>
-                    <field name="status" widget="statusbar" statusbar_visible="pending,running,success,error"/>
+                    <field name="status" widget="statusbar" statusbar_visible="pending,running,warning,success,error"/>
                 </header>
                 <sheet>
                     <div class="oe_title">

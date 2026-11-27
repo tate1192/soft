@@ -83,9 +83,74 @@ class TestRcloneCommand(TransactionCase):
     def test_copy_keeps_both_args(self):
         cloud = self._cloud()
         remote = cloud._remote_path('x.zip')
-        cmd = cloud._build_rclone_command('copy', '/local/x.zip', remote)
+        cmd = cloud._build_rclone_command('copyto', '/local/x.zip', remote)
         self.assertEqual(cmd[-2], '/local/x.zip')
         self.assertEqual(cmd[-1], remote)
+
+    def test_extras_are_applied_before_positional_arguments(self):
+        cloud = self._cloud(rclone_flags='--verbose "--header=X-Test:two words"')
+        remote = cloud._remote_path()
+        cmd = cloud._build_rclone_command(
+            'lsjson', remote, '', extras=['--recursive', '--max-depth', '3'],
+        )
+        self.assertIn('--verbose', cmd)
+        self.assertIn('--header=X-Test:two words', cmd)
+        self.assertIn('--recursive', cmd)
+        self.assertIn('--max-depth', cmd)
+        self.assertEqual(cmd[-1], remote)
+
+    def test_direct_remote_uses_on_the_fly_backend_syntax(self):
+        cloud = self._cloud()
+        self.assertEqual(cloud._remote_path('x.zip'), ':s3:mybucket/x.zip')
+
+    def test_upload_uses_copyto_and_verifies_remote_size(self):
+        import json
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        cloud = self._cloud()
+        with tempfile.NamedTemporaryFile() as backup:
+            backup.write(b'backup-data')
+            backup.flush()
+            size = os.path.getsize(backup.name)
+            results = [
+                {'success': True, 'message': '', 'stdout': ''},
+                {
+                    'success': True,
+                    'message': '',
+                    'stdout': json.dumps({'Name': 'x.zip', 'Size': size}),
+                },
+            ]
+            with patch.object(type(cloud), '_rclone_available', return_value=True), \
+                    patch.object(type(cloud), '_run_rclone', side_effect=results) as run:
+                result = cloud.upload_backup(backup.name, 'x.zip')
+
+        self.assertTrue(result['success'])
+        self.assertEqual(run.call_args_list[0].args[0][1], 'copyto')
+        self.assertIn('--checksum', run.call_args_list[0].args[0])
+
+    def test_preflight_probes_write_access_and_removes_probe(self):
+        import json
+        from unittest.mock import patch
+
+        cloud = self._cloud()
+        results = [
+            {'success': True, 'message': '', 'stdout': ''},
+            {
+                'success': True,
+                'message': '',
+                'stdout': json.dumps({'Size': 5}),
+            },
+            {'success': True, 'message': '', 'stdout': ''},
+        ]
+        with patch.object(type(cloud), '_rclone_available', return_value=True), \
+                patch.object(type(cloud), '_run_rclone', side_effect=results) as run:
+            result = cloud._preflight_check()
+
+        self.assertTrue(result['success'])
+        self.assertEqual(run.call_args_list[0].args[0][1], 'copyto')
+        self.assertEqual(run.call_args_list[2].args[0][1], 'deletefile')
 
     def test_nonsecret_flags_still_present(self):
         cmd = self._cmd(self._cloud(
