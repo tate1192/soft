@@ -19,3 +19,5 @@ access_backup_provider_cloud_admin,backup.provider.cloud.admin,model_backup_prov
 
 access_backup_restore_wizard_admin,backup.restore.wizard.admin,model_backup_restore_wizard,backup_versatile.group_backup_admin,1,1,1,1
 
+access_backup_artifact_admin,backup.artifact.admin,model_backup_artifact,backup_versatile.group_backup_admin,1,1,1,1
+

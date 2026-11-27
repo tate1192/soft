@@ -78,6 +78,11 @@ class BackupProviderAbstract(models.AbstractModel):
                 'Backup administrator rights are required for this operation.'
             ))
 
+    def _provider_result_key(self):
+        """Return the stable provider identity used in job result mappings."""
+        self.ensure_one()
+        return '%s,%s' % (self._name, self.id)
+
     def test_connection_action(self):
         """
         Test connection method for UI button - shows notification and updates fields.

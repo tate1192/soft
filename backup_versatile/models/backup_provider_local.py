@@ -6,8 +6,9 @@ import shutil
 import datetime
 import errno
 import logging
+import tempfile
 
-from odoo import models, fields, api
+from odoo import _, models, fields, api
 from odoo.exceptions import UserError, ValidationError
 
 _logger = logging.getLogger(__name__)
@@ -79,17 +80,9 @@ class BackupProviderLocal(models.Model):
             else:
                 message = "Directory exists and is accessible: %s" % self.backup_directory
             
-            # Check write permissions
-            test_file = os.path.join(self.backup_directory, '.write_test')
-
-            try:
-                with open(test_file, 'w') as f:
-                    f.write('test')
-
-                os.remove(test_file)
-                message += "\n" + "Write permissions: OK"
-            except (IOError, OSError) as e:
-                raise UserError("No write permission in directory: %s" % str(e))
+            # Check write permissions with an unpredictable, owner-only probe.
+            self._probe_directory_writable(self.backup_directory)
+            message += "\nWrite permissions: OK"
             
             # Check disk space
             if self.check_disk_space:
@@ -134,45 +127,64 @@ class BackupProviderLocal(models.Model):
 
     @api.private
     def upload_backup(self, backup_file_path, remote_filename):
-        """Copy backup file to local directory."""
+        """Atomically copy backup file to local directory."""
         self.ensure_one()
-        
+
+        temp_path = None
         try:
             remote_filename = self._sanitize_remote_filename(remote_filename)
             # Determine target directory
             target_dir = self._get_target_directory()
-            
+
             # Ensure target directory exists. Backups are full database dumps,
-            # so keep both the directory and the files owner-only (0700/0600):
-            # a 0755 dir + 0644 file (copy2 keeps the source mode) would make
-            # every dump world-readable on the host.
+            # so keep both the directory and the files owner-only (0700/0600).
             os.makedirs(target_dir, mode=0o700, exist_ok=True)
-            
+
             # Check available space
             if self.check_disk_space:
                 backup_size = os.path.getsize(backup_file_path) / (1024**3)  # Convert to GB
                 free_space = self._get_free_disk_space()
-                
+
                 if free_space - backup_size < self.min_free_space_gb:
                     raise UserError(
-                        "Insufficient disk space for backup. Required: %.2f GB, Available: %.2f GB" 
+                        "Insufficient disk space for backup. Required: %.2f GB, Available: %.2f GB"
                         % (backup_size + self.min_free_space_gb, free_space)
                     )
-            
-            # Copy file to target directory
+
             target_path = os.path.join(target_dir, remote_filename)
-            
-            shutil.copy2(backup_file_path, target_path)
-            # copy2 preserves the source mode (0644 by default); tighten it.
-            os.chmod(target_path, 0o600)
-            
-            # Verify the copy
-            if not self._verify_backup_integrity(target_path, backup_file_path):
-                raise UserError("Backup verification failed after upload")
-            
+
+            # The temporary file must be in the target directory so os.replace
+            # is atomic. mkstemp creates it with mode 0600 and a unique name;
+            # the final filename never exposes a partially copied dump.
+            with open(backup_file_path, 'rb') as source_file:
+                file_descriptor, temp_path = tempfile.mkstemp(
+                    prefix='.%s.' % remote_filename,
+                    suffix='.part',
+                    dir=target_dir,
+                )
+                try:
+                    os.chmod(temp_path, 0o600)
+                    with os.fdopen(file_descriptor, 'wb') as target_file:
+                        file_descriptor = None
+                        shutil.copyfileobj(source_file, target_file, length=1024 * 1024)
+                        target_file.flush()
+                        os.fsync(target_file.fileno())
+                finally:
+                    if file_descriptor is not None:
+                        os.close(file_descriptor)
+
+                # SHA-256 comparison fails closed before the final name is
+                # published. A failed verification leaves any previous final
+                # backup untouched.
+                if not self._verify_backup_integrity(temp_path, backup_file_path):
+                    raise UserError("Backup verification failed after upload")
+
+                os.replace(temp_path, target_path)
+                temp_path = None
+
             # Get file stats
             file_stats = os.stat(target_path)
-            
+
             return {
                 'success': True,
                 'message': "Backup uploaded successfully to: %s" % target_path,
@@ -190,6 +202,17 @@ class BackupProviderLocal(models.Model):
                 'message': self._describe_upload_error(e),
                 'metadata': {}
             }
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
+                except OSError as cleanup_error:
+                    _logger.warning(
+                        "Could not remove partial local backup %s: %s",
+                        temp_path, cleanup_error,
+                    )
     
     @api.private
     def download_backup(self, remote_filename, local_path):
@@ -233,7 +256,11 @@ class BackupProviderLocal(models.Model):
             if self.create_subdirectories and self.directory_pattern != 'none':
                 # Add common subdirectories
                 for root, dirs, files in os.walk(self.backup_directory):
-                    search_dirs.extend([os.path.join(root, d) for d in dirs])
+                    search_dirs.extend([
+                        os.path.join(root, directory)
+                        for directory in dirs
+                        if not os.path.islink(os.path.join(root, directory))
+                    ])
             
             for search_dir in search_dirs:
                 if not os.path.exists(search_dir):
@@ -244,7 +271,11 @@ class BackupProviderLocal(models.Model):
                         continue
                         
                     file_path = os.path.join(search_dir, filename)
-                    if os.path.isfile(file_path) and self._is_backup_file(filename):
+                    if (
+                        os.path.isfile(file_path)
+                        and not os.path.islink(file_path)
+                        and self._is_backup_file(filename)
+                    ):
                         file_stats = os.stat(file_path)
                         
                         backups.append({
@@ -264,22 +295,52 @@ class BackupProviderLocal(models.Model):
             _logger.error("Failed to list backups: %s", str(e))
             return []
     
+    def _resolve_full_path_for_delete(self, file_path):
+        """Validate an exact listing path before deleting it."""
+        if not isinstance(file_path, str) or '\x00' in file_path:
+            raise UserError(self.env._("Invalid backup path"))
+        if not os.path.isabs(file_path):
+            raise UserError(self.env._(
+                "Backup deletion requires an absolute full path"
+            ))
+        if os.path.islink(file_path):
+            raise UserError(self.env._("Refusing to delete a symbolic link"))
+
+        backup_root = os.path.realpath(self.backup_directory)
+        candidate_path = os.path.realpath(file_path)
+        try:
+            is_inside_root = os.path.commonpath([
+                backup_root, candidate_path,
+            ]) == backup_root
+        except ValueError:
+            is_inside_root = False
+        if not is_inside_root:
+            raise UserError(self.env._(
+                "Backup path is outside the configured backup directory"
+            ))
+        if not self._is_backup_file(candidate_path):
+            raise UserError(self.env._("Refusing to delete a non-backup file"))
+        return candidate_path
+
     @api.private
     def delete_backup(self, remote_filename):
-        """Delete backup file from local directory."""
+        """Delete a backup only by its exact listed full path."""
         self.ensure_one()
-        
+
         try:
-            backup_file_path = self._find_backup_file(remote_filename)
-            
-            if not backup_file_path or not os.path.exists(backup_file_path):
+            # Retention passes the exact full_path returned by list_backups.
+            # Never search by basename: another directory may contain a
+            # different file with the same name.
+            backup_file_path = self._resolve_full_path_for_delete(remote_filename)
+
+            if not os.path.exists(backup_file_path):
                 return {
                     'success': False,
                     'message': "Backup file not found: %s" % remote_filename
                 }
-            
+
             os.remove(backup_file_path)
-            
+
             return {
                 'success': True,
                 'message': "Backup file deleted successfully: %s" % backup_file_path
@@ -317,7 +378,26 @@ class BackupProviderLocal(models.Model):
             return {}
     
     # Private utility methods
-    
+
+    @staticmethod
+    def _probe_directory_writable(directory):
+        """Probe write access without predictable names or symlink following."""
+        file_descriptor, probe_path = tempfile.mkstemp(
+            prefix='.backup_versatile_probe_', dir=directory,
+        )
+        try:
+            with os.fdopen(file_descriptor, 'w') as handle:
+                file_descriptor = None
+                handle.write('probe')
+                handle.flush()
+        finally:
+            if file_descriptor is not None:
+                os.close(file_descriptor)
+            try:
+                os.unlink(probe_path)
+            except FileNotFoundError:
+                pass
+
     def _get_target_directory(self):
         """Get the target directory for new backups."""
         if not self.create_subdirectories or self.directory_pattern == 'none':
@@ -369,11 +449,8 @@ class BackupProviderLocal(models.Model):
             }
 
         target_exists = os.path.isdir(target_dir)
-        probe_file = os.path.join(probe_dir, '.backup_versatile_write_test')
         try:
-            with open(probe_file, 'w') as handle:
-                handle.write('write test')
-            os.remove(probe_file)
+            self._probe_directory_writable(probe_dir)
         except OSError as error:
             if target_exists:
                 reason = "the directory exists but is not writable by the Odoo user (%s)" % error

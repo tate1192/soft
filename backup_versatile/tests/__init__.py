@@ -1,4 +1,6 @@
 from . import test_retention_policy
+from . import test_retention_safety
+from . import test_atomic_uploads
 from . import test_zip_verification
 from . import test_path_safety
 from . import test_rclone_command
