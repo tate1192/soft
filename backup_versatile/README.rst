@@ -21,7 +21,8 @@ Formats
     A ZIP archive of the ``pg_dump`` output together with the filestore, so the
     archive is a full restorable copy of the instance.
 ``dump``
-    The plain ``pg_dump`` file: smaller, SQL only, no attachments.
+    A PostgreSQL custom-format ``pg_dump`` file: compact, SQL/data only, no
+    attachments. Restore it with ``pg_restore``.
 
 Providers
 =========
@@ -54,8 +55,9 @@ Retention
 ``custom``
     Explicit policy, evaluated by the cleanup cron.
 
-Cleanup runs from its own scheduled action and only ever deletes files that a
-job record points at.
+Cleanup runs from its own scheduled action against the configured provider
+locations. Use dedicated backup directories or prefixes; do not point a provider
+at a directory that contains unrelated files.
 
 Jobs and monitoring
 ===================
@@ -84,29 +86,32 @@ Security
 
 Two groups. *User* reads schedules, providers and jobs (read-only ACL on every
 model, no wizard). *Administrator* configures schedules and providers and is the
-only group that can restore. Credentials live on the provider record and are
-rendered as password fields; the encryption key is stored base64 encoded on the
-configuration and is masked in the form.
+only group that can restore. Credentials and the encryption key live in ordinary
+Odoo database columns. Password widgets mask them in the UI; base64 encoding is
+not at-rest encryption. Use database encryption and an external key escrow for
+production deployments.
 
 Installation
 ============
 
 ::
 
-    pip install "paramiko>=3.4,<6.0"    # SFTP provider
-    # optional: rclone, for the cloud provider
+    pip install "paramiko>=5.0,<6.0" "cryptography>=50.0,<51.0" "pyOpenSSL>=26.4,<27"
+    # optional: rclone for the cloud provider; boto3 for the S3 fallback
     odoo-bin -d <database> -i backup_versatile --stop-after-init
 
-The SFTP provider declares ``paramiko`` as an external dependency, so the module
-refuses to install without it. Both scheduled actions ship **inactive**: a
-backup schedule is enabled on the configuration, not by the install.
+The SFTP and encryption providers declare ``paramiko`` and ``cryptography`` as
+external dependencies, so the module refuses to install without them. The backup
+scheduler ships active, but no backup runs until a ``backup.config`` record is
+active and has at least one active provider.
 
 Tests
 =====
 
-``tests/`` holds 114 test methods in eleven files: file filtering, encryption,
-path safety, provider preflight, database preflight, the rclone command line,
-the restore guard, retention, the paramiko SFTP session and ZIP verification.
+``tests/`` holds 125 test methods in fourteen files: file filtering,
+encryption, path safety, provider preflight, database preflight, the rclone
+command line, the restore guard, retention, the paramiko SFTP session, ZIP
+verification, notifications, UI configuration and encryption-key management.
 They run without a network or a remote server: the SFTP session and rclone are
 stubbed.
 

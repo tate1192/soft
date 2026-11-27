@@ -21,7 +21,7 @@
         <field name="arch" type="xml">
             <form string="Local Storage Provider">
                 <header>
-                    <button name="test_connection_action" type="object" string="Test Connection" class="btn-secondary"/>
+                    <button name="test_connection_action" type="object" string="Test Connection" class="btn-secondary" groups="backup_versatile.group_backup_admin"/>
                 </header>
 
                 <sheet>
@@ -33,6 +33,7 @@
                     </div>
 
                     <group>
+                        <field name="active"/>
                         <field name="provider_type" readonly="1"/>
                     </group>
 
@@ -118,8 +119,8 @@
         <field name="arch" type="xml">
             <form string="SFTP Storage Provider">
                 <header>
-                    <button name="test_connection_action" type="object" string="Test Connection" class="btn-secondary"/>
-                    <button name="action_reset_host_key" type="object" string="Reset Pinned Host Key" class="btn-secondary"
+                    <button name="test_connection_action" type="object" string="Test Connection" class="btn-secondary" groups="backup_versatile.group_backup_admin"/>
+                    <button name="action_reset_host_key" type="object" string="Reset Pinned Host Key" class="btn-secondary" groups="backup_versatile.group_backup_admin"
                             invisible="not server_host_key"
                             confirm="Only reset the pinned host key if the SFTP server was legitimately reinstalled or migrated. If you are not sure why the host key changed, do NOT reset it and investigate first. Continue?"/>
                 </header>
@@ -132,6 +133,7 @@
                     </div>
 
                     <group>
+                        <field name="active"/>
                         <field name="provider_type" readonly="1"/>
                     </group>
 
@@ -145,7 +147,13 @@
                                     <field name="remote_directory"/>
                                 </group>
                                 <group string="Authentication">
-                                    <field name="password" password="True"/>
+                                    <field name="auth_type"/>
+                                    <field name="password" password="True"
+                                           invisible="auth_type != 'password'"/>
+                                    <field name="private_key" password="True"
+                                           invisible="auth_type != 'key'"/>
+                                    <field name="private_key_passphrase" password="True"
+                                           invisible="auth_type != 'key'"/>
                                 </group>
                             </group>
 
