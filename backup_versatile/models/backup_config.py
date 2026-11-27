@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 
 import datetime
+import json
 import logging
 import re
 
-from odoo import models, fields, api
+from odoo import _, models, fields, api
 from odoo.exceptions import AccessDenied, UserError, ValidationError
+from odoo.tools import SQL
 
 _logger = logging.getLogger(__name__)
 
@@ -173,8 +175,13 @@ class BackupConfig(models.Model):
 
     @property
     def all_providers(self):
-        """Get all configured providers."""
-        return list(self.local_provider_ids) + list(self.sftp_provider_ids) + list(self.cloud_provider_ids)
+        """Get all active configured providers."""
+        providers = (
+            list(self.local_provider_ids)
+            + list(self.sftp_provider_ids)
+            + list(self.cloud_provider_ids)
+        )
+        return [provider for provider in providers if provider.active]
 
     def _get_current_database(self):
         """Get current database name."""
@@ -387,6 +394,11 @@ class BackupConfig(models.Model):
         """Generate a random AES-256 key and store it base64-encoded."""
         self._assert_backup_admin()
         self.ensure_one()
+        if self.encrypt_key:
+            raise UserError(
+                'An encryption key already exists. Export and store it securely '
+                'before deliberately clearing this field and generating a new key.'
+            )
         try:
             import secrets
             import base64
@@ -420,8 +432,9 @@ class BackupConfig(models.Model):
         
         for provider in self.all_providers:
             try:
-                # Get list of backups
-                backups = provider.list_backups(prefix=self.database_name)
+                # Get only backups whose exact filename is associated with a
+                # successful upload to this provider by a successful job.
+                backups = self._get_owned_backups(provider)
                 
                 # Determine which backups would be deleted
                 backups_to_delete = self._get_backups_to_delete(backups)
@@ -492,8 +505,9 @@ class BackupConfig(models.Model):
         
         for provider in self.all_providers:
             try:
-                # Get list of backups
-                backups = provider.list_backups(prefix=self.database_name)
+                # Get only backups whose exact filename is associated with a
+                # successful upload to this provider by a successful job.
+                backups = self._get_owned_backups(provider)
                 
                 # Determine which backups to delete
                 backups_to_delete = self._get_backups_to_delete(backups)
@@ -503,9 +517,21 @@ class BackupConfig(models.Model):
                 
                 # Delete old backups
                 for backup in backups_to_delete:
-                    result = provider.delete_backup(backup['filename'])
+                    # Local listings carry the exact path. Passing only the
+                    # basename would make deletion search again and could pick
+                    # a different same-named file from another subdirectory.
+                    delete_target = backup['filename']
+                    if provider._name == 'backup.provider.local' and backup.get('full_path'):
+                        delete_target = backup['full_path']
+                    result = provider.delete_backup(delete_target)
                     if result.get('success'):
                         deleted_count += 1
+                        artifact_ids = backup.get('_artifact_ids')
+                        if artifact_ids:
+                            self.env['backup.artifact'].browse(artifact_ids).write({
+                                'active': False,
+                                'deleted_date': fields.Datetime.now(),
+                            })
                         _logger.info(
                             "Deleted old backup %s from provider %s", 
                             backup['filename'], provider.name
@@ -613,6 +639,147 @@ class BackupConfig(models.Model):
             }
     
     @staticmethod
+    def _split_provider_result_key(key):
+        """Return ``(model, id)`` for a canonical provider result key."""
+        if not isinstance(key, str):
+            return None
+        for separator in (',', ':'):
+            model_name, _separator, candidate_id = key.rpartition(separator)
+            if (
+                candidate_id.isdigit()
+                and model_name.startswith('backup.provider.')
+            ):
+                return model_name, int(candidate_id)
+        return None
+
+    def _provider_upload_succeeded(self, job, provider):
+        """Return whether a job proves a successful upload to ``provider``.
+
+        New jobs key ``provider_results`` by provider model and database id.
+        Legacy jobs used the provider name; that fallback is accepted only when
+        the name is unique across every provider attached to this config and
+        the result contains no canonical keys at all.
+        """
+        try:
+            provider_results = json.loads(job.provider_results or '{}')
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(provider_results, dict):
+            return False
+
+        canonical_keys = (
+            provider._provider_result_key(),
+            '%s:%s' % (provider._name, provider.id),
+        )
+        for key in canonical_keys:
+            if key in provider_results:
+                result = provider_results[key]
+                return isinstance(result, dict) and result.get('success') is True
+
+        # A canonical key is authoritative even when its result failed. Never
+        # fall back to a possibly ambiguous name in that case.
+        if any(self._split_provider_result_key(key) for key in provider_results):
+            return False
+
+        provider_name = provider.name
+        if not provider_name:
+            return False
+        configured_providers = (
+            list(self.local_provider_ids)
+            + list(self.sftp_provider_ids)
+            + list(self.cloud_provider_ids)
+        )
+        if sum(p.name == provider_name for p in configured_providers) != 1:
+            return False
+        result = provider_results.get(provider_name)
+        return isinstance(result, dict) and result.get('success') is True
+
+    def _provider_artifact_id(self, job, provider):
+        """Return the durable artifact ID recorded for this provider, if any."""
+        try:
+            provider_results = json.loads(job.provider_results or '{}')
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(provider_results, dict):
+            return None
+        for key in (
+            provider._provider_result_key(),
+            '%s:%s' % (provider._name, provider.id),
+        ):
+            result = provider_results.get(key)
+            if isinstance(result, dict) and result.get('artifact_id'):
+                try:
+                    return int(result['artifact_id'])
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def _get_owned_backups(self, provider):
+        """List exact files proven to belong to this config/provider.
+
+        Durable artifacts remain authoritative after job history is pruned.
+        Legacy successful jobs are accepted only when they predate artifacts.
+        Duplicate filenames without an exact object path are skipped.
+        """
+        listed_backups = provider.list_backups(prefix=self.database_name) or []
+        backups_by_filename = {}
+        for backup in listed_backups:
+            filename = backup.get('filename')
+            if filename:
+                backups_by_filename.setdefault(filename, []).append(backup)
+
+        owned_backups = {}
+        artifacts = self.env['backup.artifact'].search([
+            ('config_id', '=', self.id),
+            ('provider_model', '=', provider._name),
+            ('provider_id', '=', provider.id),
+            ('active', '=', True),
+        ])
+        for artifact in artifacts:
+            matches = backups_by_filename.get(artifact.filename, [])
+            if artifact.object_path:
+                matches = [
+                    backup for backup in matches
+                    if (
+                        backup.get('full_path')
+                        or backup.get('remote_path')
+                    ) == artifact.object_path
+                ]
+            if len(matches) != 1:
+                continue
+            backup = dict(matches[0])
+            path_key = (
+                backup.get('full_path')
+                or backup.get('remote_path')
+                or backup['filename']
+            )
+            backup['_artifact_ids'] = [artifact.id]
+            owned_backups[path_key] = backup
+
+        jobs = self.env['backup.job'].search_fetch([
+            ('config_id', '=', self.id),
+            ('status', '=', 'success'),
+            ('backup_filename', '!=', False),
+        ], ['backup_filename', 'provider_results'])
+
+        for job in jobs:
+            if self._provider_artifact_id(job, provider):
+                continue
+            if not self._provider_upload_succeeded(job, provider):
+                continue
+            matches = backups_by_filename.get(job.backup_filename, [])
+            if len(matches) != 1:
+                continue
+            backup = dict(matches[0])
+            path_key = (
+                backup.get('full_path')
+                or backup.get('remote_path')
+                or backup['filename']
+            )
+            owned_backups.setdefault(path_key, backup)
+        return list(owned_backups.values())
+
+    @staticmethod
     def _normalize_dt(value):
         """Normalize a datetime to naive UTC for safe comparison.
 
@@ -668,23 +835,46 @@ class BackupConfig(models.Model):
                 if beyond_count or too_old:
                     backups_to_delete.append(backup)
 
+        # Never delete the last verified copy, even when every copy is older
+        # than the time-based cutoff. The caller supplies only owned backups.
+        if sorted_backups:
+            newest_backup = sorted_backups[0]
+            backups_to_delete = [
+                backup for backup in backups_to_delete
+                if backup is not newest_backup
+            ]
+
         return backups_to_delete
-    
+
     def _update_backup_statistics(self, result):
         """Update backup statistics after a backup operation."""
-        status = 'success' if result.get('success') else 'error'
+        self.ensure_one()
+        backup_job = result.get('backup_job')
+        status = result.get('status') or getattr(backup_job, 'status', None)
+        if status not in ('success', 'warning', 'error'):
+            status = 'success' if result.get('success') else 'error'
         message = result.get('message', 'Unknown result')
-        
+
         vals = {
             'last_backup_date': fields.Datetime.now(),
             'last_backup_status': status,
             'last_backup_message': message,
         }
-        
-        if result.get('success'):
-            vals['total_backups_created'] = self.total_backups_created + 1
-        
+
         self.write(vals)
+
+        if result.get('success'):
+            # Increment in SQL so concurrent completed jobs cannot overwrite
+            # each other by reading and writing the same cached counter. Flush
+            # first so an earlier cached value cannot overwrite the increment.
+            self.flush_recordset(['total_backups_created'])
+            self.env.cr.execute(SQL(
+                "UPDATE %s SET total_backups_created = total_backups_created + 1 "
+                "WHERE id = %s",
+                SQL.identifier(self._table),
+                self.id,
+            ))
+            self.invalidate_recordset(['total_backups_created'])
 
     def _send_notification(self, backup_job, notification_type):
         """
@@ -699,7 +889,9 @@ class BackupConfig(models.Model):
 
         try:
             # Check if mail server is configured
-            mail_server = self.env['ir.mail_server'].sudo().search([], order='sequence asc', limit=1)
+            mail_server = self.env['ir.mail_server'].sudo().search(
+                [('active', '=', True)], order='sequence asc', limit=1,
+            )
             if not mail_server:
                 _logger.warning("Cannot send backup notification: no mail server configured in Odoo")
                 return
@@ -734,20 +926,20 @@ class BackupConfig(models.Model):
 
             # Build and send email
             _logger.info("Sending backup notification email from %s to %s", sender_email, recipient_emails)
-            msg = mail_server.build_email(
+            msg = mail_server._build_email__(
                 sender_email,
                 recipient_emails,
                 subject,
                 body
             )
-            mail_server.send_email(msg)
+            mail_server.send_email(msg, mail_server_id=mail_server.id)
             _logger.info("Backup notification sent successfully")
         except Exception as e:
             # Log detailed error but don't raise - email failures shouldn't affect backup success
             _logger.warning(
                 "Failed to send backup notification for job %s (Status: %s). "
-                "Error: %s. The backup itself completed successfully, but email notification failed. "
-                "Please check your mail server configuration.",
+                "Error: %s. The backup result is unchanged, but the email "
+                "notification failed. Please check the mail server configuration.",
                 backup_job.id, notification_type, str(e)
             )
 
@@ -842,16 +1034,24 @@ class BackupConfig(models.Model):
         })
     
     # Validation methods
-    @api.constrains('active')
+    @api.constrains(
+        'active',
+        'local_provider_ids',
+        'sftp_provider_ids',
+        'cloud_provider_ids',
+    )
     def _check_providers(self):
-        """Ensure at least one provider is configured for active configurations."""
+        """Ensure active configurations have at least one active provider."""
         for record in self:
             # Only validate when activating a configuration (not during installation)
             if (record.active and 
                 not self.env.context.get('install_mode') and
                 not self.env.context.get('module_installation') and
-                len(record.all_providers) == 0):
-                raise ValidationError("At least one storage provider must be configured for active backup configurations")
+                not record.all_providers):
+                raise ValidationError(self.env._(
+                    "At least one active storage provider must be configured "
+                    "for active backup configurations"
+                ))
 
     @api.constrains('retention_count', 'retention_policy')
     def _check_retention_count(self):
@@ -866,6 +1066,15 @@ class BackupConfig(models.Model):
         for record in self:
             if record.retention_policy in ('days', 'custom') and record.retention_days < 1:
                 raise ValidationError("Retention days must be at least 1")
+
+    @api.constrains('job_retention_days')
+    def _check_job_retention_days(self):
+        """Validate job history retention days."""
+        for record in self:
+            if record.job_retention_days < 0:
+                raise ValidationError(self.env._(
+                    "Job retention days must be non-negative"
+                ))
     
     @api.constrains('notification_emails')
     def _check_notification_emails(self):
@@ -904,6 +1113,12 @@ class BackupConfig(models.Model):
         
         for config in configs:
             try:
+                if not config.all_providers:
+                    _logger.info(
+                        "Skipping backup configuration %s: no active storage providers",
+                        config.name,
+                    )
+                    continue
                 _logger.info("Starting backup for configuration: %s", config.name)
                 # Set context to indicate programmatic execution
                 backup_job = config.with_context(manual_execution=False).create_backup()
@@ -911,9 +1126,17 @@ class BackupConfig(models.Model):
                     "Backup completed for configuration %s, status: %s", 
                     config.name, backup_job.status
                 )
-                
-                # Clean up old backups (programmatic execution)
-                config.with_context(manual_execution=False).cleanup_old_backups()
+
+                # Retention is safe only after a fully successful backup. A
+                # warning means at least one provider failed; an error means no
+                # new verified copy may exist at all.
+                if backup_job.status == 'success':
+                    config.with_context(manual_execution=False).cleanup_old_backups()
+                else:
+                    _logger.info(
+                        "Skipping retention for configuration %s after backup status: %s",
+                        config.name, backup_job.status,
+                    )
                 
             except Exception as e:
                 _logger.error(

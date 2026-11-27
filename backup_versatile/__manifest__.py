@@ -43,14 +43,14 @@
     'author': "Softteknik Bilişim",
     'website': "https://softteknik.com",
     'category': 'Administration',
-    'version': '19.0.1.0.6',
+    'version': '19.0.1.0.7',
 
     # Module dependencies
     'depends': ['base'],
 
     # External dependencies
     'external_dependencies': {
-        'python': ['paramiko'],
+        'python': ['paramiko', 'cryptography'],
     },
 
     # Data files

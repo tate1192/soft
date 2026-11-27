@@ -23,9 +23,11 @@
             <form string="Cloud Storage Provider">
                 <header>
                     <button name="test_connection_action" type="object"
-                            string="Test Connection" class="btn-primary"/>
+                            string="Test Connection" class="btn-primary"
+                            groups="backup_versatile.group_backup_admin"/>
                     <button name="action_reset_custom_remote" type="object"
                             string="Reset Remote" class="btn-secondary"
+                            groups="backup_versatile.group_backup_admin"
                             confirm="Reset to connection fields mode?"/>
                 </header>
                 <sheet>

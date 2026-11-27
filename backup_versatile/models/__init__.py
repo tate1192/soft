@@ -6,3 +6,4 @@ from . import backup_provider_sftp
 from . import backup_provider_cloud
 from . import backup_config
 from . import backup_job
+from . import backup_artifact

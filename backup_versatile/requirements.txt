@@ -2,6 +2,12 @@
 # =========================================
 #
 # Required:
-paramiko>=3.4,<6.0
+paramiko>=5.0,<6.0
+cryptography>=50.0,<51.0
+pyOpenSSL>=26.4,<27
 #
-# pip install "paramiko>=3.4,<6.0"
+# Optional:
+#   rclone (cloud provider, primary engine)
+#   boto3 (S3-compatible cloud provider fallback)
+#
+# pip install "paramiko>=5.0,<6.0" "cryptography>=50.0,<51.0" "pyOpenSSL>=26.4,<27"

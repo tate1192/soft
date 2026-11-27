@@ -1,4 +1,6 @@
 from . import test_retention_policy
+from . import test_retention_safety
+from . import test_atomic_uploads
 from . import test_zip_verification
 from . import test_path_safety
 from . import test_rclone_command
@@ -10,3 +12,7 @@ from . import test_sftp_paramiko
 from . import test_provider_preflight
 from . import test_database_preflight
 from . import test_rpc_security
+from . import test_backup_integrity
+from . import test_notifications
+from . import test_ui_configuration
+from . import test_key_management

@@ -3,9 +3,12 @@
 import json
 import logging
 import os
+import posixpath
+import shlex
 import shutil
 import subprocess
 import tempfile
+import uuid
 from datetime import datetime
 
 from odoo import models, fields, api
@@ -61,7 +64,6 @@ class BackupProviderCloud(models.Model):
 
     bucket = fields.Char(
         string='Bucket / Container',
-        required=True,
         help='Bucket name (S3) or container (Azure) or remote path',
     )
 
@@ -152,8 +154,12 @@ class BackupProviderCloud(models.Model):
         return value
 
     def _boto3_available(self):
-        """Return True if boto3 is installed and (for S3) usable."""
-        return BOTO3_AVAILABLE and self.cloud_service in ('s3', 'aws_s3')
+        """Return True if boto3 is installed and usable for direct S3 mode."""
+        return (
+            BOTO3_AVAILABLE
+            and not self.use_custom_remote
+            and self.cloud_service in ('s3', 'aws_s3')
+        )
 
     def _build_rclone_command(self, operation, src, dst, extras=None):
         """Build an ``rclone`` subprocess command list.
@@ -194,9 +200,13 @@ class BackupProviderCloud(models.Model):
             # are injected via environment variables by _run_rclone (see
             # _rclone_secret_env) so they never leak through /proc/<pid>/cmdline.
 
-        # Extra user-supplied flags
+        # Extra user-supplied flags. shlex preserves quoted values while the
+        # subprocess still receives an argument list (never shell=True).
         if self.rclone_flags:
-            cmd.extend(self.rclone_flags.split())
+            cmd.extend(shlex.split(self.rclone_flags))
+
+        if extras:
+            cmd.extend(extras)
 
         # Append src and dst. Do NOT append empty strings: rclone commands
         # like ``ls``/``lsjson``/``deletefile`` take a single remote argument
@@ -278,6 +288,96 @@ class BackupProviderCloud(models.Model):
         except Exception as e:
             return {'success': False, 'message': f'rclone error: {e}'}
 
+    def _remote_file_size(self, remote_path, object_key=None):
+        """Return the remote object size, or raise when it cannot be read."""
+        if not self._rclone_available():
+            if not self._boto3_available():
+                raise UserError('rclone or boto3 is required for cloud storage')
+            import boto3 as b3
+            client = b3.Session(
+                aws_access_key_id=self.access_key_id,
+                aws_secret_access_key=self.secret_access_key,
+                region_name=self.region,
+            ).client('s3', endpoint_url=self.endpoint)
+            key = object_key or self._sanitize_remote_key(remote_path.rsplit('/', 1)[-1])
+            return client.head_object(Bucket=self.bucket, Key=key)['ContentLength']
+
+        result = self._run_rclone(self._build_rclone_command(
+            'lsjson', remote_path, '', extras=['--stat'],
+        ))
+        if not result['success']:
+            raise UserError('Could not verify uploaded object: %s' % result['message'])
+        try:
+            metadata = json.loads(result['stdout'] or '[]')
+            if isinstance(metadata, list):
+                metadata = metadata[0]
+            return int(metadata['Size'])
+        except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
+            raise UserError('Could not verify uploaded object: %s' % e) from e
+
+    def _preflight_check(self):
+        """Prove cloud write/delete access before an expensive database dump."""
+        self.ensure_one()
+        probe_name = '.backup_versatile_probe_%s' % uuid.uuid4().hex
+        probe_path = self._remote_path(probe_name)
+        probe_created = False
+        try:
+            if not self._rclone_available():
+                if not self._boto3_available():
+                    return {'success': False, 'message': 'rclone or boto3 is required for cloud storage'}
+                import boto3 as b3
+                client = b3.Session(
+                    aws_access_key_id=self.access_key_id,
+                    aws_secret_access_key=self.secret_access_key,
+                    region_name=self.region,
+                ).client('s3', endpoint_url=self.endpoint)
+                client.put_object(Bucket=self.bucket, Key=probe_name, Body=b'probe')
+                probe_created = True
+                client.delete_object(Bucket=self.bucket, Key=probe_name)
+                probe_created = False
+                return {'success': True, 'message': 'Cloud destination is writable'}
+
+            with tempfile.NamedTemporaryFile(prefix='backup_cloud_probe_') as probe:
+                probe.write(b'probe')
+                probe.flush()
+                result = self._run_rclone(self._build_rclone_command(
+                    'copyto', probe.name, probe_path,
+                ))
+                if not result['success']:
+                    return {'success': False, 'message': result['message']}
+                probe_created = True
+                if self._remote_file_size(probe_path, probe_name) != 5:
+                    return {'success': False, 'message': 'Cloud probe verification failed'}
+                result = self._run_rclone(self._build_rclone_command(
+                    'deletefile', probe_path, '',
+                ))
+                if not result['success']:
+                    return {'success': False, 'message': result['message']}
+                probe_created = False
+            return {'success': True, 'message': 'Cloud destination is writable'}
+        except Exception as e:
+            return {'success': False, 'message': 'Cloud preflight failed: %s' % e}
+        finally:
+            if probe_created:
+                try:
+                    if self._rclone_available():
+                        self._run_rclone(self._build_rclone_command(
+                            'deletefile', probe_path, '',
+                        ))
+                    else:
+                        import boto3 as b3
+                        client = b3.Session(
+                            aws_access_key_id=self.access_key_id,
+                            aws_secret_access_key=self.secret_access_key,
+                            region_name=self.region,
+                        ).client('s3', endpoint_url=self.endpoint)
+                        client.delete_object(Bucket=self.bucket, Key=probe_name)
+                except Exception as cleanup_error:
+                    _logger.warning(
+                        'Could not remove cloud preflight probe %s: %s',
+                        probe_path, cleanup_error,
+                    )
+
     # ── Remote path helpers ─────────────────────────────────────────────
 
     def _remote_base(self):
@@ -285,7 +385,9 @@ class BackupProviderCloud(models.Model):
         if self.use_custom_remote and self.custom_remote_name:
             prefix = '%s:%s' % (self.custom_remote_name, self.custom_remote_path or '')
         else:
-            prefix = '%s:%s' % (self._rclone_remote_name(), self.bucket or '')
+            # A leading colon tells rclone to create an on-the-fly backend.
+            # Without it, ``s3:bucket`` means a configured remote named ``s3``.
+            prefix = ':%s:%s' % (self._rclone_remote_name(), self.bucket or '')
         return prefix.rstrip('/')
 
     def _rclone_remote_name(self):
@@ -302,13 +404,25 @@ class BackupProviderCloud(models.Model):
         }
         return mapping.get(self.cloud_service, 's3')
 
+    @staticmethod
+    def _sanitize_remote_key(filename):
+        """Return a safe relative object key without flattening nested keys."""
+        if not filename:
+            return filename
+        if '\x00' in filename:
+            raise UserError("Invalid filename: null byte")
+        normalized = posixpath.normpath(filename.replace('\\', '/'))
+        if normalized in ('', '.', '..') or normalized.startswith('/'):
+            raise UserError("Invalid filename: %r" % filename)
+        if any(part == '..' for part in normalized.split('/')):
+            raise UserError("Invalid filename: %r" % filename)
+        return normalized
+
     def _remote_path(self, filename=''):
-        """Full remote path for a given filename."""
+        """Full remote path for a given filename or relative object key."""
         base = self._remote_base()
         if filename:
-            safe = os.path.basename(filename.rstrip('/'))
-            if safe in ('', '.', '..') or '\x00' in filename:
-                raise UserError("Invalid filename: %r" % filename)
+            safe = self._sanitize_remote_key(filename)
             return '%s/%s' % (base, safe)
         return base
 
@@ -381,15 +495,33 @@ class BackupProviderCloud(models.Model):
             }
 
         remote_path = self._remote_path(remote_filename)
-        cmd = self._build_rclone_command('copy', backup_file_path, remote_path)
+        cmd = self._build_rclone_command(
+            'copyto', backup_file_path, remote_path, extras=['--checksum'],
+        )
         result = self._run_rclone(cmd)
 
         if result['success']:
-            # Get file size
+            # Get file size and prove the final object exists with that size.
             try:
                 size_bytes = os.path.getsize(backup_file_path)
             except OSError:
                 size_bytes = 0
+            try:
+                remote_size = self._remote_file_size(
+                    remote_path, self._sanitize_remote_key(remote_filename),
+                )
+            except Exception as e:
+                return {
+                    'success': False,
+                    'message': 'Upload verification failed: %s' % e,
+                    'metadata': {},
+                }
+            if remote_size != size_bytes:
+                return {
+                    'success': False,
+                    'message': 'Upload verification failed: local %d, remote %d' % (size_bytes, remote_size),
+                    'metadata': {},
+                }
             return {
                 'success': True,
                 'message': 'Uploaded to %s' % remote_path,
@@ -410,6 +542,7 @@ class BackupProviderCloud(models.Model):
         """Fallback S3 upload using boto3."""
         try:
             import boto3 as b3
+            object_key = self._sanitize_remote_key(remote_filename)
             session = b3.Session(
                 aws_access_key_id=self.access_key_id,
                 aws_secret_access_key=self.secret_access_key,
@@ -419,11 +552,21 @@ class BackupProviderCloud(models.Model):
             extra_args = {}
             if self.acl:
                 extra_args['ACL'] = self.acl
+            if self.storage_class:
+                extra_args['StorageClass'] = self.storage_class
             client.upload_file(
-                backup_file_path, self.bucket, remote_filename,
+                backup_file_path, self.bucket, object_key,
                 ExtraArgs=extra_args,
             )
             size_bytes = os.path.getsize(backup_file_path)
+            remote_size = client.head_object(
+                Bucket=self.bucket, Key=object_key,
+            )['ContentLength']
+            if remote_size != size_bytes:
+                raise UserError(
+                    'Upload verification failed: local %d, remote %d'
+                    % (size_bytes, remote_size)
+                )
             return {
                 'success': True,
                 'message': 'Uploaded to s3://%s/%s' % (self.bucket, remote_filename),
@@ -455,7 +598,7 @@ class BackupProviderCloud(models.Model):
             }
 
         remote_path = self._remote_path(remote_filename)
-        cmd = self._build_rclone_command('copy', remote_path, os.path.dirname(local_path))
+        cmd = self._build_rclone_command('copyto', remote_path, local_path)
         result = self._run_rclone(cmd)
 
         if result['success'] and os.path.exists(local_path):
@@ -472,13 +615,14 @@ class BackupProviderCloud(models.Model):
         """Fallback S3 download using boto3."""
         try:
             import boto3 as b3
+            object_key = self._sanitize_remote_key(remote_filename)
             session = b3.Session(
                 aws_access_key_id=self.access_key_id,
                 aws_secret_access_key=self.secret_access_key,
                 region_name=self.region,
             )
             client = session.client('s3', endpoint_url=self.endpoint)
-            client.download_file(self.bucket, remote_filename, local_path)
+            client.download_file(self.bucket, object_key, local_path)
             return {
                 'success': True,
                 'message': 'Downloaded to %s' % local_path,
@@ -506,13 +650,12 @@ class BackupProviderCloud(models.Model):
         result = self._run_rclone(cmd)
 
         if not result['success']:
-            _logger.warning('Failed to list cloud backups: %s', result['message'])
-            return []
+            raise UserError('Failed to list cloud backups: %s' % result['message'])
 
         try:
             raw = json.loads(result['stdout'] or '[]')
-        except (json.JSONDecodeError, ValueError):
-            return []
+        except (json.JSONDecodeError, ValueError) as e:
+            raise UserError('Invalid rclone lsjson output: %s' % e) from e
 
         backups = []
         for entry in raw:
@@ -523,7 +666,7 @@ class BackupProviderCloud(models.Model):
                 continue
             backups.append({
                 'filename': name,
-                'remote_path': '%s/%s' % (self._remote_path(), name),
+                'remote_path': self._remote_path(name),
                 'size_bytes': entry.get('Size', 0),
                 'size_gb': (entry.get('Size', 0) or 0) / (1024**3),
                 'modified_date': datetime.fromisoformat(
@@ -550,8 +693,12 @@ class BackupProviderCloud(models.Model):
             kwargs = {'Bucket': self.bucket}
             if prefix:
                 kwargs['Prefix'] = prefix
-            response = client.list_objects_v2(**kwargs)
-            contents = response.get('Contents', [])
+            paginator = client.get_paginator('list_objects_v2')
+            contents = [
+                obj
+                for page in paginator.paginate(**kwargs)
+                for obj in page.get('Contents', [])
+            ]
             backups = []
             for obj in contents:
                 name = obj['Key']
@@ -569,9 +716,8 @@ class BackupProviderCloud(models.Model):
                 reverse=True,
             )
             return backups
-        except Exception:
-            _logger.exception('boto3 list failed')
-            return []
+        except Exception as e:
+            raise UserError('Failed to list S3 backups: %s' % e) from e
 
     @api.private
     def delete_backup(self, remote_filename):
@@ -595,13 +741,14 @@ class BackupProviderCloud(models.Model):
         """Fallback S3 delete using boto3."""
         try:
             import boto3 as b3
+            object_key = self._sanitize_remote_key(remote_filename)
             session = b3.Session(
                 aws_access_key_id=self.access_key_id,
                 aws_secret_access_key=self.secret_access_key,
                 region_name=self.region,
             )
             client = session.client('s3', endpoint_url=self.endpoint)
-            client.delete_object(Bucket=self.bucket, Key=remote_filename)
+            client.delete_object(Bucket=self.bucket, Key=object_key)
             return {'success': True, 'message': 'Deleted s3://%s/%s' % (self.bucket, remote_filename)}
         except Exception as e:
             return {'success': False, 'message': 'Delete failed: %s' % e}
@@ -628,24 +775,18 @@ class BackupProviderCloud(models.Model):
 
     # ── Validation ──────────────────────────────────────────────────────
 
-    @api.constrains('bucket')
+    @api.constrains('bucket', 'use_custom_remote', 'custom_remote_name')
     def _check_bucket(self):
         for record in self:
-            if not record.bucket:
+            if record.use_custom_remote:
+                if not record.custom_remote_name:
+                    raise UserError('Custom rclone remote name is required.')
+            elif not record.bucket:
                 raise UserError('Bucket / Container is required.')
-
-    @api.constrains('access_key_id', 'secret_access_key')
-    def _check_credentials(self):
-        for record in self:
-            if not record.use_custom_remote:
-                if not record.access_key_id or not record.secret_access_key:
-                    raise UserError(
-                        'Access Key ID and Secret Access Key are required '
-                        'when not using a pre-configured remote.'
-                    )
 
     def action_reset_custom_remote(self):
         """Reset the custom remote configuration."""
+        self._assert_backup_admin()
         self.ensure_one()
         self.write({
             'use_custom_remote': False,
