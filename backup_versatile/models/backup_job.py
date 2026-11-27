@@ -855,7 +855,23 @@ class BackupJob(models.Model):
             
             try:
                 result = provider.upload_backup(backup_file_path, self.backup_filename)
-                results[provider.name] = result
+                if result.get('success'):
+                    metadata = result.get('metadata') or {}
+                    artifact = self.env['backup.artifact'].create({
+                        'job_id': self.id,
+                        'config_id': self.config_id.id,
+                        'provider_model': provider._name,
+                        'provider_id': provider.id,
+                        'filename': self.backup_filename,
+                        'object_path': (
+                            metadata.get('file_path')
+                            or metadata.get('remote_path')
+                            or ''
+                        ),
+                        'size_bytes': metadata.get('size_bytes') or False,
+                    })
+                    result['artifact_id'] = artifact.id
+                results[provider._provider_result_key()] = result
                 
                 if result.get('success'):
                     self._log(f"Upload to {label} successful")
@@ -864,7 +880,7 @@ class BackupJob(models.Model):
             except Exception as e:
                 error_msg = f"Upload to {label} failed with exception: {e}"
                 self._log(error_msg)
-                results[provider.name] = {
+                results[provider._provider_result_key()] = {
                     'success': False,
                     'message': str(e),
                     'metadata': {}
