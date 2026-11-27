@@ -5,6 +5,7 @@
         id="database_ultimate_backup_menu_root"
         name="Backup Versatile"
         sequence="14"
+        groups="backup_versatile.group_backup_user"
         web_icon="backup_versatile,static/description/icon.png">
 
         <menuitem
@@ -54,6 +55,7 @@
             name="Restore Backup"
             action="action_backup_restore_wizard"
             sequence="40"
+            groups="backup_versatile.group_backup_admin"
         />
 
     </menuitem>
